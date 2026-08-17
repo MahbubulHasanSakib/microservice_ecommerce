@@ -1,0 +1,14 @@
+{
+  "name": "@ecommerce/shared",
+  "version": "1.0.0",
+  "description": "Shared types, constants, and contracts for the ecommerce microservices platform",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:watch": "tsc -p tsconfig.json --watch",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {}
+}
