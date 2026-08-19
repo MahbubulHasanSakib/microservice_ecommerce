@@ -7,17 +7,24 @@ import {
   Inject,
   Param,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
-import { SERVICES, USER_PATTERNS, UserResponse } from '@ecommerce/shared';
+import {
+  AuthenticatedUser,
+  Role,
+  SERVICES,
+  USER_PATTERNS,
+  UserResponse,
+} from '@ecommerce/shared';
 import { CreateUserDto } from './dto/create-user.dto';
 import { FindUserParamDto } from './dto/find-user-param.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
-/**
- * Standard RPC Timeout in milliseconds for OLTP user operations.
- * Protects API Gateway from hanging indefinitely if downstream service is stuck.
- */
 const RPC_TIMEOUT_MS = 5000;
 
 @Controller('users')
@@ -29,7 +36,7 @@ export class UsersController {
 
   /**
    * POST /users
-   * Validates request body and forwards via TCP to User Service.
+   * Direct user profile creation (internal / admin provisioning).
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -42,10 +49,26 @@ export class UsersController {
   }
 
   /**
+   * GET /users/me
+   * Protected: Returns the currently authenticated user's profile.
+   */
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async getCurrentUser(@CurrentUser() user: AuthenticatedUser): Promise<UserResponse> {
+    return firstValueFrom(
+      this.userClient
+        .send<UserResponse>(USER_PATTERNS.FIND_BY_ID, { id: user.userId })
+        .pipe(timeout(RPC_TIMEOUT_MS)),
+    );
+  }
+
+  /**
    * GET /users/:id
-   * Validates UUID param and retrieves user details from User Service.
+   * Protected (Admin-only RBAC): Retrieves any user by ID.
    */
   @Get(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
   async findUser(@Param() params: FindUserParamDto): Promise<UserResponse> {
     return firstValueFrom(
       this.userClient

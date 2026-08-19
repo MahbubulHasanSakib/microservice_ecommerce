@@ -1,4 +1,10 @@
-import { Catch, RpcExceptionFilter as NestRpcExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { Observable, throwError } from 'rxjs';
 import { RpcException } from '@nestjs/microservices';
 
@@ -10,8 +16,8 @@ import { RpcException } from '@nestjs/microservices';
  * preserves the HTTP status code across the network to the API Gateway.
  */
 @Catch()
-export class RpcExceptionFilter implements NestRpcExceptionFilter {
-  catch(exception: any): Observable<any> {
+export class RpcExceptionFilter implements ExceptionFilter {
+  catch(exception: any, _host: ArgumentsHost): Observable<any> {
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal service error';
 

@@ -1,14 +1,14 @@
 /**
  * @ecommerce/shared
  *
- * The single source of truth for cross-service contracts.
- * Everything exported here is part of the public API between services.
- * Internal service details (Prisma models, internal helpers) are NEVER exported here.
+ * Single source of truth for cross-service contracts.
  */
 
-// Constants — message patterns and event names
+// Constants & Enums
 export * from './constants/service-patterns';
 export * from './constants/services';
+export * from './enums/role.enum';
 
-// Types — request/response shapes and event payloads
+// Types & Contracts
 export * from './types/user.types';
+export * from './types/auth.types';

@@ -12,9 +12,17 @@
     "format:check": "prettier --check \"{apps,libs}/**/*.ts\"",
     "test": "npm run test --workspaces --if-present",
     "build:shared": "npm run build --workspace=@ecommerce/shared",
-    "build:apps": "npm run build --workspace=@ecommerce/user-service && npm run build --workspace=@ecommerce/api-gateway",
+    "build:apps": "npm run build --workspace=@ecommerce/user-service && npm run build --workspace=@ecommerce/auth-service && npm run build --workspace=@ecommerce/api-gateway",
     "build": "npm run build:shared && npm run build:apps",
     "type-check": "npm run type-check --workspaces --if-present"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/microservices": "^11.0.1",
+    "@nestjs/platform-express": "^11.0.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.7",

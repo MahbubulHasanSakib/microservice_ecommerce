@@ -8,12 +8,6 @@ import {
 import { Transport } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
 
-/**
- * Health endpoints for API Gateway
- *
- * /health       (Liveness Probe)  - Checks if Gateway process is alive & heap memory is healthy.
- * /health/ready (Readiness Probe) - Checks if Gateway can communicate with downstream User Service.
- */
 @Controller('health')
 export class HealthController {
   constructor(
@@ -36,6 +30,8 @@ export class HealthController {
   readiness() {
     const userServiceHost = this.configService.get<string>('userService.host', 'localhost');
     const userServicePort = this.configService.get<number>('userService.port', 3001);
+    const authServiceHost = this.configService.get<string>('authService.host', 'localhost');
+    const authServicePort = this.configService.get<number>('authService.port', 3002);
 
     return this.health.check([
       () => this.memory.checkHeap('memory_heap', 512 * 1024 * 1024),
@@ -46,6 +42,16 @@ export class HealthController {
           options: {
             host: userServiceHost,
             port: userServicePort,
+          },
+          timeout: 2000,
+        }),
+      // Readiness probe verifies TCP connection to Auth Service
+      () =>
+        this.microservice.pingCheck('auth_service_tcp', {
+          transport: Transport.TCP,
+          options: {
+            host: authServiceHost,
+            port: authServicePort,
           },
           timeout: 2000,
         }),

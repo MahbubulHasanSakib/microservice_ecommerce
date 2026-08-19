@@ -66,8 +66,11 @@ ehthumbs.db
 # 9. Prisma Generated Client (Regenerated via `prisma generate`)
 node_modules/.prisma/
 **/node_modules/.prisma/
+**/prisma/client/
 
 # 10. Docker Volumes & Local Mounts
 docker-data/
 postgres_data/
 **/postgres_data/
+redis_data/
+**/redis_data/

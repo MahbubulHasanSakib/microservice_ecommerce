@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "./client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Credential {
+  id        String   @id @default(uuid())
+  userId    String   @unique // Foreign user ID from User Service
+  email     String   @unique
+  password  String   // bcrypt hash (12 rounds)
+  roles     String[] @default(["CUSTOMER"]) // CUSTOMER, ADMIN, SELLER
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+
+  @@index([email])
+  @@map("credentials")
+}
+
+model RefreshToken {
+  id           String     @id @default(uuid())
+  userId       String
+  tokenHash    String     @unique // SHA-256 hash of the plain refresh token
+  familyId     String     // Groups rotated tokens to detect reuse
+  isRevoked    Boolean    @default(false)
+  expiresAt    DateTime
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  credential   Credential @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  email     String?
+  action    String   // LOGIN_SUCCESS, LOGIN_FAILED, LOGOUT, REFRESH_TOKEN_REUSED
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@map("audit_logs")
+}

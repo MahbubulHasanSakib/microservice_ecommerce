@@ -5,21 +5,11 @@ const config: Config = {
   rootDir: '.',
   testRegex: '.*\\.spec\\.ts$',
   transform: {
-    '^.+\\.(t|j)s$': ['ts-jest', {
-      tsconfig: {
-        paths: {
-          '@ecommerce/shared': ['<rootDir>/../../libs/shared/src'],
-          '@ecommerce/shared/*': ['<rootDir>/../../libs/shared/src/*'],
-        },
-      },
-    }],
+    '^.+\\.ts$': 'ts-jest',
   },
-  collectCoverageFrom: ['src/**/*.(t|j)s'],
+  collectCoverageFrom: ['src/**/*.(t|j)s', '!src/main.ts'],
   coverageDirectory: './coverage',
   testEnvironment: 'node',
-  moduleNameMapper: {
-    '^@ecommerce/shared(.*)$': '<rootDir>/../../libs/shared/src$1',
-  },
 };
 
 export default config;
