@@ -11,6 +11,7 @@ import { ClientProxy } from '@nestjs/microservices';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { firstValueFrom, timeout } from 'rxjs';
+import type { StringValue } from 'ms';
 import {
   AuthTokensResponse,
   JwtPayload,
@@ -40,7 +41,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     @Inject(SERVICES.USER_SERVICE)
     private readonly userClient: ClientProxy,
-  ) { }
+  ) {}
 
   /**
    * Register a new user
@@ -73,8 +74,11 @@ export class AuthService {
           })
           .pipe(timeout(USER_SERVICE_TIMEOUT_MS)),
       );
-    } catch (err: any) {
-      this.logger.error({ message: 'Failed to create user in user-service', error: err?.message });
+    } catch (err: unknown) {
+      this.logger.error({
+        message: 'Failed to create user in user-service',
+        error: (err as Error)?.message,
+      });
       throw err;
     }
 
@@ -102,7 +106,6 @@ export class AuthService {
     const credential = await this.prisma.credential.findUnique({
       where: { email: dto.email },
     });
-    console.log(credential)
 
     if (!credential || !credential.isActive) {
       await this.logAudit(null, dto.email, 'LOGIN_FAILED');
@@ -242,9 +245,10 @@ export class AuthService {
       jti,
     };
 
+    const expiresIn = this.configService.get<string>('jwt.accessExpiration', '900s') as StringValue;
     const accessToken = this.jwtService.sign(payload, {
       secret: this.configService.get<string>('jwt.secret'),
-      expiresIn: (this.configService.get<string>('jwt.accessExpiration', '900s') as any),
+      expiresIn,
     });
 
     const plainRefreshToken = crypto.randomBytes(40).toString('hex');
@@ -274,7 +278,11 @@ export class AuthService {
     return crypto.createHash('sha256').update(token).digest('hex');
   }
 
-  private async logAudit(userId: string | null, email: string | null, action: string): Promise<void> {
+  private async logAudit(
+    userId: string | null,
+    email: string | null,
+    action: string,
+  ): Promise<void> {
     try {
       await this.prisma.auditLog.create({
         data: { userId, email, action },

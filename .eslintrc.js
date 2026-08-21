@@ -16,6 +16,7 @@ module.exports = {
     'dist/',
     'node_modules/',
     'coverage/',
+    '**/prisma/client/**',
     '*.js',
     '!jest.config.ts',
   ],

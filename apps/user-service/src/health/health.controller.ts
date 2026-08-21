@@ -22,9 +22,7 @@ export class HealthController {
   @Get()
   @HealthCheck()
   liveness() {
-    return this.health.check([
-      () => this.memory.checkHeap('memory_heap', 256 * 1024 * 1024),
-    ]);
+    return this.health.check([() => this.memory.checkHeap('memory_heap', 256 * 1024 * 1024)]);
   }
 
   @Get('ready')

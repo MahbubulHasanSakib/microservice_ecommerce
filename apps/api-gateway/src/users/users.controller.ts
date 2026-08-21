@@ -11,13 +11,7 @@ import {
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
-import {
-  AuthenticatedUser,
-  Role,
-  SERVICES,
-  USER_PATTERNS,
-  UserResponse,
-} from '@ecommerce/shared';
+import { AuthenticatedUser, Role, SERVICES, USER_PATTERNS, UserResponse } from '@ecommerce/shared';
 import { CreateUserDto } from './dto/create-user.dto';
 import { FindUserParamDto } from './dto/find-user-param.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -42,9 +36,7 @@ export class UsersController {
   @HttpCode(HttpStatus.CREATED)
   async createUser(@Body() dto: CreateUserDto): Promise<UserResponse> {
     return firstValueFrom(
-      this.userClient
-        .send<UserResponse>(USER_PATTERNS.CREATE, dto)
-        .pipe(timeout(RPC_TIMEOUT_MS)),
+      this.userClient.send<UserResponse>(USER_PATTERNS.CREATE, dto).pipe(timeout(RPC_TIMEOUT_MS)),
     );
   }
 

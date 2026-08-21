@@ -12,7 +12,7 @@
     "format:check": "prettier --check \"{apps,libs}/**/*.ts\"",
     "test": "npm run test --workspaces --if-present",
     "build:shared": "npm run build --workspace=@ecommerce/shared",
-    "build:apps": "npm run build --workspace=@ecommerce/user-service && npm run build --workspace=@ecommerce/auth-service && npm run build --workspace=@ecommerce/api-gateway",
+    "build:apps": "npm run build --workspace=@ecommerce/user-service && npm run build --workspace=@ecommerce/auth-service && npm run build --workspace=@ecommerce/product-service && npm run build --workspace=@ecommerce/order-service && npm run build --workspace=@ecommerce/api-gateway",
     "build": "npm run build:shared && npm run build:apps",
     "type-check": "npm run type-check --workspaces --if-present"
   },

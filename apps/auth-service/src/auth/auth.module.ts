@@ -4,6 +4,7 @@ import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { SERVICES } from '@ecommerce/shared';
+import type { StringValue } from 'ms';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 
@@ -16,7 +17,7 @@ import { AuthController } from './auth.controller';
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('jwt.secret'),
         signOptions: {
-          expiresIn: (configService.get<string>('jwt.accessExpiration', '900s') as any),
+          expiresIn: configService.get<string>('jwt.accessExpiration', '900s') as StringValue,
         },
       }),
     }),

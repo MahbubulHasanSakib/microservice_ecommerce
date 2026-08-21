@@ -5,10 +5,10 @@ import { UserResponse } from './user.types';
  * Access Token Payload stored inside signed JWTs
  */
 export interface JwtPayload {
-  sub: string;          // userId
+  sub: string; // userId
   email: string;
   roles: Role[];
-  jti: string;          // unique token ID for Redis blacklisting
+  jti: string; // unique token ID for Redis blacklisting
   iat?: number;
   exp?: number;
 }
@@ -19,7 +19,7 @@ export interface JwtPayload {
 export interface AuthTokensResponse {
   accessToken: string;
   refreshToken: string;
-  expiresIn: number;    // seconds
+  expiresIn: number; // seconds
   user: UserResponse;
 }
 

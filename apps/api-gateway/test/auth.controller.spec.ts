@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { of } from 'rxjs';
 import { JwtService } from '@nestjs/jwt';
+import { Request } from 'express';
 import { Role, SERVICES } from '@ecommerce/shared';
 import { AuthController } from '../src/auth/auth.controller';
 
@@ -39,7 +40,14 @@ describe('Gateway AuthController', () => {
       accessToken: 'jwt.access.token',
       refreshToken: 'refresh.token',
       expiresIn: 900,
-      user: { id: 'u-1', email: 'test@example.com', firstName: 'Test', lastName: 'User', createdAt: new Date(), updatedAt: new Date() },
+      user: {
+        id: 'u-1',
+        email: 'test@example.com',
+        firstName: 'Test',
+        lastName: 'User',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
     };
 
     mockAuthClient.send.mockReturnValue(of(mockResponse));
@@ -55,7 +63,14 @@ describe('Gateway AuthController', () => {
       accessToken: 'jwt.access.token',
       refreshToken: 'refresh.token',
       expiresIn: 900,
-      user: { id: 'u-1', email: 'test@example.com', firstName: 'Test', lastName: 'User', createdAt: new Date(), updatedAt: new Date() },
+      user: {
+        id: 'u-1',
+        email: 'test@example.com',
+        firstName: 'Test',
+        lastName: 'User',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
     };
 
     mockAuthClient.send.mockReturnValue(of(mockResponse));
@@ -69,7 +84,7 @@ describe('Gateway AuthController', () => {
 
     const result = await controller.logout(
       { userId: 'u-1', email: 'test@example.com', roles: [Role.CUSTOMER] },
-      { headers: { authorization: 'Bearer mock-token' } },
+      { headers: { authorization: 'Bearer mock-token' } } as unknown as Request,
       { refreshToken: 'mock-refresh' },
     );
 

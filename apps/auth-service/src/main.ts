@@ -36,10 +36,9 @@ async function bootstrap(): Promise<void> {
   await app.startAllMicroservices();
   await app.listen(httpPort);
 
-  app.get(Logger).log(
-    `Auth Service running — TCP :${tcpPort}, HTTP :${httpPort} [${nodeEnv}]`,
-    'Bootstrap',
-  );
+  app
+    .get(Logger)
+    .log(`Auth Service running — TCP :${tcpPort}, HTTP :${httpPort} [${nodeEnv}]`, 'Bootstrap');
 }
 
 bootstrap();

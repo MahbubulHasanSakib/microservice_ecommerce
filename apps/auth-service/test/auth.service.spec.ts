@@ -35,7 +35,7 @@ const mockJwtService = {
 };
 
 const mockConfigService = {
-  get: jest.fn((key: string, defaultValue?: any) => {
+  get: jest.fn((key: string, defaultValue?: unknown) => {
     if (key === 'jwt.secret') return 'test-secret-key-that-is-at-least-32-chars-long';
     if (key === 'jwt.accessExpiration') return '900s';
     return defaultValue;
@@ -120,14 +120,16 @@ describe('AuthService', () => {
         isActive: true,
       });
 
-      mockUserClient.send.mockReturnValue(of({
-        id: 'user-uuid-1',
-        email: 'david@example.com',
-        firstName: 'David',
-        lastName: 'Miller',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }));
+      mockUserClient.send.mockReturnValue(
+        of({
+          id: 'user-uuid-1',
+          email: 'david@example.com',
+          firstName: 'David',
+          lastName: 'Miller',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+      );
 
       mockPrismaService.refreshToken.create.mockResolvedValue({ id: 'rt-1' });
 

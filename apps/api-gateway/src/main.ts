@@ -52,10 +52,7 @@ async function bootstrap(): Promise<void> {
   await app.listen(port);
 
   // This log appears in structured JSON format via Pino
-  app.get(Logger).log(
-    `API Gateway running on port ${port} [${nodeEnv}]`,
-    'Bootstrap',
-  );
+  app.get(Logger).log(`API Gateway running on port ${port} [${nodeEnv}]`, 'Bootstrap');
 }
 
 bootstrap();

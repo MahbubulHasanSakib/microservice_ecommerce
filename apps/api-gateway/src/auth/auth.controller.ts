@@ -8,6 +8,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import {
@@ -85,7 +86,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logout(
     @CurrentUser() user: AuthenticatedUser,
-    @Req() req: any,
+    @Req() req: Request,
     @Body() body?: { refreshToken?: string },
   ): Promise<{ success: boolean }> {
     const authHeader = req.headers['authorization'] || '';

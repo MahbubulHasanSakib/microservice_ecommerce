@@ -11,7 +11,7 @@ const PRISMA_UNIQUE_CONSTRAINT_CODE = 'P2002';
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateUserDto): Promise<UserResponse> {
     this.logger.debug({ email: dto.email }, 'Creating user');

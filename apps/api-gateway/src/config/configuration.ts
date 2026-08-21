@@ -16,4 +16,12 @@ export const configuration = () => ({
     host: process.env['AUTH_SERVICE_HOST'] ?? 'localhost',
     port: parseInt(process.env['AUTH_SERVICE_PORT'] ?? '3002', 10),
   },
+  productService: {
+    host: process.env['PRODUCT_SERVICE_HOST'] ?? 'localhost',
+    port: parseInt(process.env['PRODUCT_SERVICE_PORT'] ?? '3003', 10),
+  },
+  orderService: {
+    host: process.env['ORDER_SERVICE_HOST'] ?? 'localhost',
+    port: parseInt(process.env['ORDER_SERVICE_PORT'] ?? '3004', 10),
+  },
 });

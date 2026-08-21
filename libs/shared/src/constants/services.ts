@@ -4,6 +4,8 @@
 export const SERVICES = {
   USER_SERVICE: 'USER_SERVICE',
   AUTH_SERVICE: 'AUTH_SERVICE',
+  PRODUCT_SERVICE: 'PRODUCT_SERVICE',
+  ORDER_SERVICE: 'ORDER_SERVICE',
 } as const;
 
 export type ServiceName = (typeof SERVICES)[keyof typeof SERVICES];

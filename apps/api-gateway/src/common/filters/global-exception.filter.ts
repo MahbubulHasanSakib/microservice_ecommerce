@@ -20,7 +20,7 @@ import { CORRELATION_ID_HEADER } from '../middleware/correlation-id.middleware';
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
 
-  catch(exception: any, host: ArgumentsHost): void {
+  catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
@@ -36,37 +36,43 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       const res = exception.getResponse();
       message =
         typeof res === 'object' && res !== null && 'message' in res
-          ? Array.isArray((res as any).message)
-            ? (res as any).message.join(', ')
-            : (res as any).message
+          ? Array.isArray((res as Record<string, unknown>).message)
+            ? ((res as Record<string, unknown>).message as string[]).join(', ')
+            : String((res as Record<string, unknown>).message)
           : exception.message;
     }
     // 2. RxJS Timeout (Downstream microservice did not reply within SLA)
-    else if (exception instanceof TimeoutError || exception?.name === 'TimeoutError') {
+    else if (
+      exception instanceof TimeoutError ||
+      (typeof exception === 'object' &&
+        exception !== null &&
+        'name' in exception &&
+        (exception as { name: string }).name === 'TimeoutError')
+    ) {
       status = HttpStatus.GATEWAY_TIMEOUT;
       message = 'Downstream microservice timed out';
     }
     // 3. Serialized RPC Exceptions from downstream TCP microservices
     else if (exception && typeof exception === 'object') {
-      // Check for nested error object (e.g. exception.error) or direct properties
-      const errorPayload = exception.error ?? exception;
-      
+      const errObj = exception as Record<string, unknown>;
+      const errorPayload =
+        (errObj.error && typeof errObj.error === 'object'
+          ? (errObj.error as Record<string, unknown>)
+          : errObj) || errObj;
+
       const code =
-        errorPayload.statusCode ??
-        errorPayload.status ??
-        exception.statusCode ??
-        exception.status;
+        errorPayload.statusCode ?? errorPayload.status ?? errObj.statusCode ?? errObj.status;
 
       if (typeof code === 'number' && code >= 400 && code < 600) {
         status = code;
-      } else if (exception.code === 'ECONNREFUSED' || errorPayload.code === 'ECONNREFUSED') {
+      } else if (errObj.code === 'ECONNREFUSED' || errorPayload.code === 'ECONNREFUSED') {
         status = HttpStatus.SERVICE_UNAVAILABLE;
         message = 'Downstream microservice is currently unreachable';
       }
 
       const msg =
         errorPayload.message ??
-        exception.message ??
+        errObj.message ??
         (typeof errorPayload === 'string' ? errorPayload : null);
 
       if (msg && typeof msg === 'string') {
