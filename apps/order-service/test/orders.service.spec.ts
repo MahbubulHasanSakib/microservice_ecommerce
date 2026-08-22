@@ -22,6 +22,9 @@ describe('OrdersService', () => {
   let productClient: {
     send: jest.Mock;
   };
+  let rmqClient: {
+    emit: jest.Mock;
+  };
 
   beforeEach(async () => {
     prisma = {
@@ -40,6 +43,10 @@ describe('OrdersService', () => {
       send: jest.fn(),
     };
 
+    rmqClient = {
+      emit: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
@@ -50,6 +57,10 @@ describe('OrdersService', () => {
         {
           provide: SERVICES.PRODUCT_SERVICE,
           useValue: productClient,
+        },
+        {
+          provide: SERVICES.RABBITMQ_SERVICE,
+          useValue: rmqClient,
         },
       ],
     }).compile();
@@ -115,6 +126,15 @@ describe('OrdersService', () => {
       expect(result.items[0].productName).toEqual('Mechanical Keyboard');
       expect(result.items[0].unitPrice).toEqual(120.0);
       expect(prisma.$transaction).toHaveBeenCalled();
+      expect(rmqClient.emit).toHaveBeenCalledWith(
+        'order.created',
+        expect.objectContaining({
+          orderId: 'ord-1',
+          orderNumber: 'ORD-12345',
+          userId: 'user-1',
+          totalAmount: 240,
+        }),
+      );
     });
 
     it('should throw BadRequestException if stock is insufficient', async () => {

@@ -20,6 +20,21 @@ import { OrdersController } from './orders.controller';
           },
         }),
       },
+      {
+        name: SERVICES.RABBITMQ_SERVICE,
+        imports: [ConfigModule],
+        inject: [ConfigService],
+        useFactory: (configService: ConfigService) => ({
+          transport: Transport.RMQ,
+          options: {
+            urls: [configService.get<string>('rabbitmq.url', 'amqp://guest:guest@localhost:5672')],
+            queue: configService.get<string>('rabbitmq.notificationQueue', 'notification.queue'),
+            queueOptions: {
+              durable: true,
+            },
+          },
+        }),
+      },
     ]),
   ],
   controllers: [OrdersController],

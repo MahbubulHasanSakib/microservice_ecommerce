@@ -50,3 +50,34 @@ export const ORDER_PATTERNS = {
   CANCEL: 'order.cancel',
   UPDATE_STATUS: 'order.update_status',
 } as const;
+
+/**
+ * Domain Event patterns for asynchronous RabbitMQ messaging.
+ */
+export const ORDER_EVENTS = {
+  ORDER_CREATED: 'order.created',
+  ORDER_CONFIRMED: 'order.confirmed',
+  ORDER_CANCELLED: 'order.cancelled',
+  ORDER_SHIPPED: 'order.shipped',
+  ORDER_DELIVERED: 'order.delivered',
+} as const;
+
+/**
+ * RabbitMQ Queue definitions across the system.
+ */
+export const RABBITMQ_QUEUES = {
+  NOTIFICATION_QUEUE: 'notification.queue',
+  ORDER_QUEUE: 'order.queue',
+  PAYMENT_QUEUE: 'payment.queue',
+  INVENTORY_QUEUE: 'inventory.queue',
+} as const;
+
+/**
+ * RabbitMQ Exchange definitions across the system.
+ */
+export const RABBITMQ_EXCHANGES = {
+  ORDER_EXCHANGE: 'order.exchange',
+  NOTIFICATION_EXCHANGE: 'notification.exchange',
+  PAYMENT_EXCHANGE: 'payment.exchange',
+  INVENTORY_EXCHANGE: 'inventory.exchange',
+} as const;

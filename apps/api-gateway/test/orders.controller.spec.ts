@@ -55,6 +55,7 @@ describe('Gateway OrdersController', () => {
     expect(result.userId).toBe('user-123');
     expect(orderClient.send).toHaveBeenCalledWith('order.create', {
       userId: 'user-123',
+      userEmail: 'test@example.com',
       items: createDto.items,
       shippingAddress: undefined,
     });

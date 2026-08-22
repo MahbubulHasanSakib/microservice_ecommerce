@@ -53,6 +53,7 @@ export class OrdersController {
       this.orderClient
         .send<OrderResponse>(ORDER_PATTERNS.CREATE, {
           userId: user.userId,
+          userEmail: user.email,
           items: dto.items,
           shippingAddress: dto.shippingAddress,
         })

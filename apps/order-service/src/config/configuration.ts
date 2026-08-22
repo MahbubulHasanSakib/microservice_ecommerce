@@ -9,6 +9,10 @@ export interface OrderServiceConfig {
   database: {
     url: string;
   };
+  rabbitmq: {
+    url: string;
+    notificationQueue: string;
+  };
 }
 
 export const configuration = (): OrderServiceConfig => ({
@@ -21,5 +25,9 @@ export const configuration = (): OrderServiceConfig => ({
   },
   database: {
     url: process.env.DATABASE_URL ?? '',
+  },
+  rabbitmq: {
+    url: process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672',
+    notificationQueue: process.env.RABBITMQ_NOTIFICATION_QUEUE ?? 'notification.queue',
   },
 });

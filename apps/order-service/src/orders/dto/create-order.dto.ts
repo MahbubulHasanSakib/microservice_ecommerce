@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsEmail,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -24,6 +25,10 @@ export class CreateOrderDto {
   @IsUUID('4')
   @IsNotEmpty()
   userId: string;
+
+  @IsOptional()
+  @IsEmail()
+  userEmail?: string;
 
   @IsArray()
   @ArrayMinSize(1)

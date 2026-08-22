@@ -16,3 +16,4 @@ export * from './types/auth.types';
 export * from './types/pagination.types';
 export * from './types/product.types';
 export * from './types/order.types';
+export * from './types/events.types';

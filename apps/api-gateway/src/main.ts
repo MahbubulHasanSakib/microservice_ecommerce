@@ -16,6 +16,11 @@ async function bootstrap(): Promise<void> {
   const port = configService.get<number>('port') ?? 3000;
   const nodeEnv = configService.get<string>('nodeEnv');
 
+  // Set global API version prefix: /api/v1/... (excluding health endpoints)
+  app.setGlobalPrefix('api/v1', {
+    exclude: ['health', 'health/ready'],
+  });
+
   /**
    * Global validation pipe.
    * Applies to ALL incoming HTTP requests automatically.

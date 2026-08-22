@@ -9,6 +9,8 @@ import {
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import {
+  ORDER_EVENTS,
+  OrderCreatedEvent,
   OrderStatus,
   OrderResponse,
   PaginatedResult,
@@ -31,6 +33,8 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     @Inject(SERVICES.PRODUCT_SERVICE)
     private readonly productClient: ClientProxy,
+    @Inject(SERVICES.RABBITMQ_SERVICE)
+    private readonly rmqClient: ClientProxy,
   ) {}
 
   private mapToResponse(
@@ -213,6 +217,37 @@ export class OrdersService {
         }
       }
       throw dbError;
+    }
+
+    // 5. Asynchronously publish OrderCreatedEvent to RabbitMQ
+    try {
+      const eventPayload: OrderCreatedEvent = {
+        orderId: createdOrder.id,
+        orderNumber: createdOrder.orderNumber,
+        userId: createdOrder.userId,
+        userEmail: dto.userEmail,
+        totalAmount: Number(createdOrder.totalAmount),
+        status: createdOrder.status as OrderStatus,
+        shippingAddress: createdOrder.shippingAddress as Record<string, unknown> | null,
+        items: createdOrder.items.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          unitPrice: Number(item.unitPrice),
+          quantity: item.quantity,
+          subtotal: Number(item.subtotal),
+        })),
+        createdAt: createdOrder.createdAt,
+      };
+
+      this.rmqClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload);
+      this.logger.log(
+        `Dispatched '${ORDER_EVENTS.ORDER_CREATED}' event for order #${createdOrder.orderNumber}`,
+      );
+    } catch (eventErr) {
+      this.logger.error(
+        `Failed to emit '${ORDER_EVENTS.ORDER_CREATED}' event for order #${createdOrder.orderNumber}: ${(eventErr as Error).message}`,
+        (eventErr as Error).stack,
+      );
     }
 
     return this.mapToResponse(createdOrder);

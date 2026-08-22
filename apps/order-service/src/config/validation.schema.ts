@@ -9,4 +9,6 @@ export const validationSchema = Joi.object({
   PRODUCT_SERVICE_HOST: Joi.string().default('localhost'),
   PRODUCT_SERVICE_PORT: Joi.number().port().default(3003),
   DATABASE_URL: Joi.string().required(),
+  RABBITMQ_URL: Joi.string().uri({ scheme: ['amqp', 'amqps'] }).default('amqp://guest:guest@localhost:5672'),
+  RABBITMQ_NOTIFICATION_QUEUE: Joi.string().default('notification.queue'),
 });
