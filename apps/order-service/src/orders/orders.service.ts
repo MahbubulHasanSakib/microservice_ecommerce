@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
@@ -14,6 +15,8 @@ import {
   OrderStatus,
   OrderResponse,
   PaginatedResult,
+  PaymentFailedEvent,
+  PaymentSucceededEvent,
   PRODUCT_PATTERNS,
   ProductResponse,
   SERVICES,
@@ -35,6 +38,9 @@ export class OrdersService {
     private readonly productClient: ClientProxy,
     @Inject(SERVICES.RABBITMQ_SERVICE)
     private readonly rmqClient: ClientProxy,
+    @Optional()
+    @Inject('PAYMENT_RMQ_CLIENT')
+    private readonly paymentRmqClient?: ClientProxy,
   ) {}
 
   private mapToResponse(
@@ -219,7 +225,7 @@ export class OrdersService {
       throw dbError;
     }
 
-    // 5. Asynchronously publish OrderCreatedEvent to RabbitMQ
+    // 5. Asynchronously publish OrderCreatedEvent to RabbitMQ (Payment & Notification)
     try {
       const eventPayload: OrderCreatedEvent = {
         orderId: createdOrder.id,
@@ -240,6 +246,9 @@ export class OrdersService {
       };
 
       this.rmqClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload);
+      if (this.paymentRmqClient) {
+        this.paymentRmqClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload);
+      }
       this.logger.log(
         `Dispatched '${ORDER_EVENTS.ORDER_CREATED}' event for order #${createdOrder.orderNumber}`,
       );
@@ -384,5 +393,88 @@ export class OrdersService {
     });
 
     return this.mapToResponse(updated);
+  }
+
+  /**
+   * Event-Driven Choreography Handler: Reacts to PaymentSucceededEvent.
+   * Updates order status from PENDING to CONFIRMED.
+   */
+  async handlePaymentSucceeded(event: PaymentSucceededEvent): Promise<OrderResponse | null> {
+    this.logger.log(`Handling '${event.status}' event for order ID: ${event.orderId}`);
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: event.orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      this.logger.warn(`Order ${event.orderId} not found when processing payment.succeeded`);
+      return null;
+    }
+
+    if (order.status === 'PENDING') {
+      const updated = await this.prisma.order.update({
+        where: { id: event.orderId },
+        data: { status: 'CONFIRMED' },
+        include: { items: true },
+      });
+      this.logger.log(`Order #${order.orderNumber} successfully CONFIRMED after payment.`);
+      return this.mapToResponse(updated);
+    }
+
+    return this.mapToResponse(order);
+  }
+
+  /**
+   * Event-Driven Choreography Handler: Reacts to PaymentFailedEvent.
+   * Updates order status to CANCELLED and performs compensating stock restoration.
+   */
+  async handlePaymentFailed(event: PaymentFailedEvent): Promise<OrderResponse | null> {
+    this.logger.log(`Handling payment failure for order ID: ${event.orderId}, Reason: ${event.reason}`);
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: event.orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      this.logger.warn(`Order ${event.orderId} not found when processing payment.failed`);
+      return null;
+    }
+
+    if (order.status === 'PENDING') {
+      // 1. Mark order as CANCELLED
+      const updated = await this.prisma.order.update({
+        where: { id: event.orderId },
+        data: { status: 'CANCELLED' },
+        include: { items: true },
+      });
+
+      // 2. Compensating transaction: Restore product stock
+      for (const item of order.items) {
+        try {
+          await firstValueFrom(
+            this.productClient
+              .send(PRODUCT_PATTERNS.UPDATE_STOCK, {
+                productId: item.productId,
+                quantityDelta: item.quantity,
+              })
+              .pipe(timeout(RPC_TIMEOUT_MS)),
+          );
+        } catch (err) {
+          this.logger.error(
+            `Failed to restore stock for product ${item.productId} during payment failure compensation for order ${order.id}`,
+            (err as Error).stack,
+          );
+        }
+      }
+
+      this.logger.log(
+        `Order #${order.orderNumber} CANCELLED and stock compensated following payment failure.`,
+      );
+      return this.mapToResponse(updated);
+    }
+
+    return this.mapToResponse(order);
   }
 }

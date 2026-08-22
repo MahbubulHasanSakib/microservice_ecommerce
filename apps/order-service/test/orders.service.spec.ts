@@ -3,7 +3,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { of } from 'rxjs';
 import { OrdersService } from '../src/orders/orders.service';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { SERVICES } from '@ecommerce/shared';
+import { PaymentStatus, SERVICES } from '@ecommerce/shared';
 import { Prisma } from '../prisma/client';
 
 describe('OrdersService', () => {
@@ -23,6 +23,9 @@ describe('OrdersService', () => {
     send: jest.Mock;
   };
   let rmqClient: {
+    emit: jest.Mock;
+  };
+  let paymentRmqClient: {
     emit: jest.Mock;
   };
 
@@ -47,6 +50,10 @@ describe('OrdersService', () => {
       emit: jest.fn(),
     };
 
+    paymentRmqClient = {
+      emit: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
@@ -61,6 +68,10 @@ describe('OrdersService', () => {
         {
           provide: SERVICES.RABBITMQ_SERVICE,
           useValue: rmqClient,
+        },
+        {
+          provide: 'PAYMENT_RMQ_CLIENT',
+          useValue: paymentRmqClient,
         },
       ],
     }).compile();
@@ -133,6 +144,12 @@ describe('OrdersService', () => {
           orderNumber: 'ORD-12345',
           userId: 'user-1',
           totalAmount: 240,
+        }),
+      );
+      expect(paymentRmqClient.emit).toHaveBeenCalledWith(
+        'order.created',
+        expect.objectContaining({
+          orderId: 'ord-1',
         }),
       );
     });
@@ -232,6 +249,92 @@ describe('OrdersService', () => {
       });
 
       await expect(service.cancel('ord-1', 'user-1', false)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('Event Choreography Handlers', () => {
+    it('should transition order from PENDING to CONFIRMED on payment.succeeded', async () => {
+      const mockOrder = {
+        id: 'ord-1',
+        orderNumber: 'ORD-100',
+        userId: 'user-1',
+        status: 'PENDING',
+        totalAmount: new Prisma.Decimal(100),
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      prisma.order.findUnique.mockResolvedValue(mockOrder);
+      prisma.order.update.mockResolvedValue({ ...mockOrder, status: 'CONFIRMED' });
+
+      const result = await service.handlePaymentSucceeded({
+        paymentId: 'pay-1',
+        orderId: 'ord-1',
+        orderNumber: 'ORD-100',
+        userId: 'user-1',
+        amount: 100,
+        currency: 'USD',
+        transactionId: 'TXN-123',
+        status: PaymentStatus.COMPLETED,
+        timestamp: new Date(),
+      });
+
+      expect(prisma.order.update).toHaveBeenCalledWith({
+        where: { id: 'ord-1' },
+        data: { status: 'CONFIRMED' },
+        include: { items: true },
+      });
+      expect(result?.status).toBe('CONFIRMED');
+    });
+
+    it('should mark order CANCELLED and restore stock on payment.failed', async () => {
+      const mockOrder = {
+        id: 'ord-1',
+        orderNumber: 'ORD-100',
+        userId: 'user-1',
+        status: 'PENDING',
+        totalAmount: new Prisma.Decimal(100),
+        items: [
+          {
+            id: 'item-1',
+            orderId: 'ord-1',
+            productId: 'prod-1',
+            productName: 'Item 1',
+            unitPrice: new Prisma.Decimal(100),
+            quantity: 2,
+            subtotal: new Prisma.Decimal(200),
+          },
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      prisma.order.findUnique.mockResolvedValue(mockOrder);
+      prisma.order.update.mockResolvedValue({ ...mockOrder, status: 'CANCELLED' });
+      productClient.send.mockReturnValue(of({ success: true }));
+
+      const result = await service.handlePaymentFailed({
+        paymentId: 'pay-fail',
+        orderId: 'ord-1',
+        userId: 'user-1',
+        amount: 100,
+        currency: 'USD',
+        reason: 'Card declined',
+        status: PaymentStatus.FAILED,
+        timestamp: new Date(),
+      });
+
+      expect(prisma.order.update).toHaveBeenCalledWith({
+        where: { id: 'ord-1' },
+        data: { status: 'CANCELLED' },
+        include: { items: true },
+      });
+      expect(productClient.send).toHaveBeenCalledWith('product.update_stock', {
+        productId: 'prod-1',
+        quantityDelta: 2,
+      });
+      expect(result?.status).toBe('CANCELLED');
     });
   });
 });

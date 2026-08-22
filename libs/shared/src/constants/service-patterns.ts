@@ -52,7 +52,17 @@ export const ORDER_PATTERNS = {
 } as const;
 
 /**
- * Domain Event patterns for asynchronous RabbitMQ messaging.
+ * Message patterns for Payment Service TCP communication.
+ */
+export const PAYMENT_PATTERNS = {
+  PROCESS: 'payment.process',
+  FIND_BY_ID: 'payment.find_by_id',
+  FIND_BY_ORDER_ID: 'payment.find_by_order_id',
+  REFUND: 'payment.refund',
+} as const;
+
+/**
+ * Domain Event patterns for asynchronous RabbitMQ messaging (Order).
  */
 export const ORDER_EVENTS = {
   ORDER_CREATED: 'order.created',
@@ -60,6 +70,16 @@ export const ORDER_EVENTS = {
   ORDER_CANCELLED: 'order.cancelled',
   ORDER_SHIPPED: 'order.shipped',
   ORDER_DELIVERED: 'order.delivered',
+} as const;
+
+/**
+ * Domain Event patterns for asynchronous RabbitMQ messaging (Payment).
+ */
+export const PAYMENT_EVENTS = {
+  PAYMENT_REQUESTED: 'payment.requested',
+  PAYMENT_SUCCEEDED: 'payment.succeeded',
+  PAYMENT_FAILED: 'payment.failed',
+  PAYMENT_REFUNDED: 'payment.refunded',
 } as const;
 
 /**

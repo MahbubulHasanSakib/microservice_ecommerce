@@ -11,6 +11,8 @@ export interface OrderServiceConfig {
   };
   rabbitmq: {
     url: string;
+    orderQueue: string;
+    paymentQueue: string;
     notificationQueue: string;
   };
 }
@@ -28,6 +30,8 @@ export const configuration = (): OrderServiceConfig => ({
   },
   rabbitmq: {
     url: process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672',
+    orderQueue: process.env.RABBITMQ_ORDER_QUEUE ?? 'order.queue',
+    paymentQueue: process.env.RABBITMQ_PAYMENT_QUEUE ?? 'payment.queue',
     notificationQueue: process.env.RABBITMQ_NOTIFICATION_QUEUE ?? 'notification.queue',
   },
 });

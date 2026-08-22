@@ -12,11 +12,11 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger));
 
   const configService = app.get(ConfigService);
-  const tcpPort = configService.get<number>('tcpPort', 3004);
-  const httpPort = configService.get<number>('httpPort', 3014);
+  const tcpPort = configService.get<number>('tcpPort', 3005);
+  const httpPort = configService.get<number>('httpPort', 3015);
   const nodeEnv = configService.get<string>('nodeEnv', 'development');
   const rabbitmqUrl = configService.get<string>('rabbitmq.url', 'amqp://guest:guest@localhost:5672');
-  const orderQueue = configService.get<string>('rabbitmq.orderQueue', 'order.queue');
+  const paymentQueue = configService.get<string>('rabbitmq.paymentQueue', 'payment.queue');
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -27,7 +27,7 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalFilters(new RpcExceptionFilter());
 
-  // 1. Attach TCP microservice listener for synchronous RPC commands
+  // 1. Attach TCP Microservice Listener for synchronous RPC commands
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.TCP,
     options: {
@@ -36,13 +36,13 @@ async function bootstrap(): Promise<void> {
     },
   });
 
-  // 2. Attach RabbitMQ microservice consumer for asynchronous choreography events (e.g. payment.succeeded, payment.failed)
+  // 2. Attach RabbitMQ Microservice Consumer for asynchronous domain events
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.RMQ,
     options: {
       urls: [rabbitmqUrl],
-      queue: orderQueue,
-      noAck: false, // Manual ACK mode
+      queue: paymentQueue,
+      noAck: false, // Enable manual acknowledgment
       queueOptions: {
         durable: true,
       },
@@ -57,7 +57,7 @@ async function bootstrap(): Promise<void> {
   app
     .get(Logger)
     .log(
-      `Order Service running — TCP :${tcpPort}, HTTP :${httpPort}, RMQ Queue :${orderQueue} [${nodeEnv}]`,
+      `Payment Service running — TCP :${tcpPort}, HTTP :${httpPort}, RMQ Queue :${paymentQueue} [${nodeEnv}]`,
       'Bootstrap',
     );
 }

@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OrderCreatedEvent } from '@ecommerce/shared';
+import {
+  OrderCreatedEvent,
+  PaymentFailedEvent,
+  PaymentSucceededEvent,
+} from '@ecommerce/shared';
 import { EmailService, EmailDispatchResult } from './email.service';
 
 @Injectable()
@@ -18,6 +22,36 @@ export class NotificationsService {
 
     this.logger.log(
       `Order confirmation notification successfully dispatched for order ${event.orderNumber}. Message ID: ${result.messageId}`,
+    );
+
+    return result;
+  }
+
+  async processPaymentSucceeded(event: PaymentSucceededEvent): Promise<EmailDispatchResult> {
+    this.logger.log(
+      `Processing PaymentSucceededEvent for order: ${event.orderNumber || event.orderId} (User: ${event.userId})`,
+    );
+
+    const emailOptions = this.emailService.formatPaymentSuccessEmail(event);
+    const result = await this.emailService.sendEmail(emailOptions);
+
+    this.logger.log(
+      `Payment receipt notification dispatched for order ${event.orderNumber || event.orderId}. Message ID: ${result.messageId}`,
+    );
+
+    return result;
+  }
+
+  async processPaymentFailed(event: PaymentFailedEvent): Promise<EmailDispatchResult> {
+    this.logger.log(
+      `Processing PaymentFailedEvent for order: ${event.orderNumber || event.orderId} (User: ${event.userId})`,
+    );
+
+    const emailOptions = this.emailService.formatPaymentFailureEmail(event);
+    const result = await this.emailService.sendEmail(emailOptions);
+
+    this.logger.log(
+      `Payment failure alert notification dispatched for order ${event.orderNumber || event.orderId}. Message ID: ${result.messageId}`,
     );
 
     return result;

@@ -1,27 +1,29 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { SERVICES } from '@ecommerce/shared';
-import { OrdersService } from './orders.service';
-import { OrdersController } from './orders.controller';
+import { PaymentsService } from './payments.service';
+import { PaymentsController } from './payments.controller';
 
 @Module({
   imports: [
     ClientsModule.registerAsync([
       {
-        name: SERVICES.PRODUCT_SERVICE,
+        name: 'ORDER_RMQ_CLIENT',
         imports: [ConfigModule],
         inject: [ConfigService],
         useFactory: (configService: ConfigService) => ({
-          transport: Transport.TCP,
+          transport: Transport.RMQ,
           options: {
-            host: configService.get<string>('productService.host', 'localhost'),
-            port: configService.get<number>('productService.port', 3003),
+            urls: [configService.get<string>('rabbitmq.url', 'amqp://guest:guest@localhost:5672')],
+            queue: configService.get<string>('rabbitmq.orderQueue', 'order.queue'),
+            queueOptions: {
+              durable: true,
+            },
           },
         }),
       },
       {
-        name: SERVICES.RABBITMQ_SERVICE,
+        name: 'NOTIFICATION_RMQ_CLIENT',
         imports: [ConfigModule],
         inject: [ConfigService],
         useFactory: (configService: ConfigService) => ({
@@ -35,25 +37,10 @@ import { OrdersController } from './orders.controller';
           },
         }),
       },
-      {
-        name: 'PAYMENT_RMQ_CLIENT',
-        imports: [ConfigModule],
-        inject: [ConfigService],
-        useFactory: (configService: ConfigService) => ({
-          transport: Transport.RMQ,
-          options: {
-            urls: [configService.get<string>('rabbitmq.url', 'amqp://guest:guest@localhost:5672')],
-            queue: configService.get<string>('rabbitmq.paymentQueue', 'payment.queue'),
-            queueOptions: {
-              durable: true,
-            },
-          },
-        }),
-      },
     ]),
   ],
-  controllers: [OrdersController],
-  providers: [OrdersService],
-  exports: [OrdersService],
+  controllers: [PaymentsController],
+  providers: [PaymentsService],
+  exports: [PaymentsService],
 })
-export class OrdersModule {}
+export class PaymentsModule {}
