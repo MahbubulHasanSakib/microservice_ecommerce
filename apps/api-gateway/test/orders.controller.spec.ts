@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { of } from 'rxjs';
+import { ServiceUnavailableException } from '@nestjs/common';
+import { of, throwError } from 'rxjs';
 import { OrderStatus, Role, SERVICES } from '@ecommerce/shared';
 import { OrdersController } from '../src/orders/orders.controller';
 
@@ -59,6 +60,21 @@ describe('Gateway OrdersController', () => {
       items: createDto.items,
       shippingAddress: undefined,
     });
+  });
+
+  it('should trip circuit breaker and throw ServiceUnavailableException on repeated downstream failures', async () => {
+    const user = { userId: 'user-123', email: 'test@example.com', roles: [Role.CUSTOMER] };
+    const createDto = { items: [{ productId: 'prod-1', quantity: 1 }] };
+
+    orderClient.send.mockReturnValue(throwError(() => new Error('Connection refused')));
+
+    // Trigger 5 failures to reach default threshold
+    for (let i = 0; i < 5; i++) {
+      await expect(controller.createOrder(user, createDto)).rejects.toThrow('Connection refused');
+    }
+
+    // 6th call should fast-fail with ServiceUnavailableException because circuit is OPEN
+    await expect(controller.createOrder(user, createDto)).rejects.toThrow(ServiceUnavailableException);
   });
 
   it('should forward get my orders query to Order Service', async () => {

@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SERVICES } from '@ecommerce/shared';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
+import { OutboxProcessor } from './outbox.processor';
 
 @Module({
   imports: [
@@ -53,7 +54,7 @@ import { OrdersController } from './orders.controller';
     ]),
   ],
   controllers: [OrdersController],
-  providers: [OrdersService],
-  exports: [OrdersService],
+  providers: [OrdersService, OutboxProcessor],
+  exports: [OrdersService, OutboxProcessor],
 })
 export class OrdersModule {}

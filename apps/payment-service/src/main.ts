@@ -3,6 +3,7 @@ import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from 'nestjs-pino';
+import { RABBITMQ_EXCHANGES, RABBITMQ_QUEUES } from '@ecommerce/shared';
 import { AppModule } from './app.module';
 import { RpcExceptionFilter } from './common/filters/rpc-exception.filter';
 
@@ -16,7 +17,10 @@ async function bootstrap(): Promise<void> {
   const httpPort = configService.get<number>('httpPort', 3015);
   const nodeEnv = configService.get<string>('nodeEnv', 'development');
   const rabbitmqUrl = configService.get<string>('rabbitmq.url', 'amqp://guest:guest@localhost:5672');
-  const paymentQueue = configService.get<string>('rabbitmq.paymentQueue', 'payment.queue');
+  const paymentQueue = configService.get<string>(
+    'rabbitmq.paymentQueue',
+    RABBITMQ_QUEUES.PAYMENT_QUEUE,
+  );
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -36,7 +40,7 @@ async function bootstrap(): Promise<void> {
     },
   });
 
-  // 2. Attach RabbitMQ Microservice Consumer for asynchronous domain events
+  // 2. Attach RabbitMQ Microservice Consumer with Dead-Letter Queue (DLQ) support
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.RMQ,
     options: {
@@ -45,6 +49,10 @@ async function bootstrap(): Promise<void> {
       noAck: false, // Enable manual acknowledgment
       queueOptions: {
         durable: true,
+        arguments: {
+          'x-dead-letter-exchange': RABBITMQ_EXCHANGES.DLX_EXCHANGE,
+          'x-dead-letter-routing-key': RABBITMQ_QUEUES.PAYMENT_DLQ,
+        },
       },
     },
   });
@@ -57,8 +65,7 @@ async function bootstrap(): Promise<void> {
   app
     .get(Logger)
     .log(
-      `Payment Service running — TCP :${tcpPort}, HTTP :${httpPort}, RMQ Queue :${paymentQueue} [${nodeEnv}]`,
-      'Bootstrap',
+      `Payment Service running — TCP :${tcpPort}, HTTP :${httpPort}, RMQ Queue :${paymentQueue} (DLQ: ${RABBITMQ_QUEUES.PAYMENT_DLQ}) [${nodeEnv}]`,
     );
 }
 

@@ -1,0 +1,131 @@
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
+import { SERVICES } from '@ecommerce/shared';
+import { PrismaService } from '../prisma/prisma.service';
+
+const POLL_INTERVAL_MS = 2000;
+const BATCH_SIZE = 20;
+const MAX_RETRIES = 5;
+
+@Injectable()
+export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(OutboxProcessor.name);
+  private timer: NodeJS.Timeout | null = null;
+  private isProcessing = false;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(SERVICES.RABBITMQ_SERVICE)
+    private readonly rmqClient: ClientProxy,
+    @Optional()
+    @Inject('PAYMENT_RMQ_CLIENT')
+    private readonly paymentRmqClient?: ClientProxy,
+  ) {}
+
+  onModuleInit(): void {
+    this.startPolling();
+    this.logger.log('Transactional Outbox Processor initialized.');
+  }
+
+  onModuleDestroy(): void {
+    this.stopPolling();
+  }
+
+  startPolling(): void {
+    this.timer = setInterval(() => {
+      this.processOutbox().catch((err) => {
+        this.logger.error(`Error in outbox polling loop: ${(err as Error).message}`, (err as Error).stack);
+      });
+    }, POLL_INTERVAL_MS);
+  }
+
+  stopPolling(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  /**
+   * Reads unpublished outbox events and dispatches them to RabbitMQ broker.
+   */
+  async processOutbox(): Promise<number> {
+    if (this.isProcessing) {
+      return 0;
+    }
+
+    this.isProcessing = true;
+
+    try {
+      const pendingEvents = await this.prisma.outboxEvent.findMany({
+        where: {
+          status: 'PENDING',
+          retryCount: { lt: MAX_RETRIES },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: BATCH_SIZE,
+      });
+
+      if (pendingEvents.length === 0) {
+        return 0;
+      }
+
+      this.logger.debug(`Found ${pendingEvents.length} pending outbox events to publish.`);
+
+      for (const event of pendingEvents) {
+        try {
+          const payload = event.payload as Record<string, unknown>;
+
+          // Dispatch to Notification Service queue
+          this.rmqClient.emit(event.eventType, payload);
+
+          // Dispatch to Payment Service queue
+          if (this.paymentRmqClient) {
+            this.paymentRmqClient.emit(event.eventType, payload);
+          }
+
+          // Mark outbox event as successfully published
+          await this.prisma.outboxEvent.update({
+            where: { id: event.id },
+            data: {
+              status: 'PUBLISHED',
+              publishedAt: new Date(),
+              errorMessage: null,
+            },
+          });
+
+          this.logger.log(
+            `[OUTBOX RELAY] Successfully published '${event.eventType}' for aggregate ${event.aggregateId}`,
+          );
+        } catch (dispatchError) {
+          const newRetryCount = event.retryCount + 1;
+          const isFailed = newRetryCount >= MAX_RETRIES;
+
+          await this.prisma.outboxEvent.update({
+            where: { id: event.id },
+            data: {
+              retryCount: newRetryCount,
+              status: isFailed ? 'FAILED' : 'PENDING',
+              errorMessage: (dispatchError as Error).message,
+            },
+          });
+
+          this.logger.warn(
+            `[OUTBOX RELAY] Failed to publish event ${event.id} (Attempt ${newRetryCount}/${MAX_RETRIES}): ${(dispatchError as Error).message}`,
+          );
+        }
+      }
+
+      return pendingEvents.length;
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+}

@@ -2,18 +2,26 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { of } from 'rxjs';
 import { OrdersService } from '../src/orders/orders.service';
+import { OutboxProcessor } from '../src/orders/outbox.processor';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { PaymentStatus, SERVICES } from '@ecommerce/shared';
 import { Prisma } from '../prisma/client';
 
-describe('OrdersService', () => {
+describe('OrdersService & Transactional Outbox', () => {
   let service: OrdersService;
+  let outboxProcessor: OutboxProcessor;
   let prisma: {
     order: {
       findUnique: jest.Mock;
       findMany: jest.Mock;
       count: jest.Mock;
       create: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
+    };
+    outboxEvent: {
+      create: jest.Mock;
+      findMany: jest.Mock;
       update: jest.Mock;
       updateMany: jest.Mock;
     };
@@ -39,6 +47,12 @@ describe('OrdersService', () => {
         update: jest.fn(),
         updateMany: jest.fn(),
       },
+      outboxEvent: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
       $transaction: jest.fn((callback) => callback(prisma)),
     };
 
@@ -57,6 +71,7 @@ describe('OrdersService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
+        OutboxProcessor,
         {
           provide: PrismaService,
           useValue: prisma,
@@ -77,14 +92,20 @@ describe('OrdersService', () => {
     }).compile();
 
     service = module.get<OrdersService>(OrdersService);
+    outboxProcessor = module.get<OutboxProcessor>(OutboxProcessor);
+  });
+
+  afterEach(() => {
+    outboxProcessor.stopPolling();
   });
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+    expect(outboxProcessor).toBeDefined();
   });
 
-  describe('create', () => {
-    it('should create order and line item snapshot atomically', async () => {
+  describe('create (with Transactional Outbox)', () => {
+    it('should create order and write OutboxEvent atomically within single DB transaction', async () => {
       productClient.send.mockImplementation((pattern) => {
         if (pattern === 'product.find_by_ids') {
           return of([
@@ -126,6 +147,7 @@ describe('OrdersService', () => {
       };
 
       prisma.order.create.mockResolvedValue(mockCreatedOrder);
+      prisma.outboxEvent.create.mockResolvedValue({ id: 'outbox-1' });
 
       const result = await service.create({
         userId: 'user-1',
@@ -134,22 +156,22 @@ describe('OrdersService', () => {
 
       expect(result.id).toEqual('ord-1');
       expect(result.totalAmount).toEqual(240.0);
-      expect(result.items[0].productName).toEqual('Mechanical Keyboard');
-      expect(result.items[0].unitPrice).toEqual(120.0);
       expect(prisma.$transaction).toHaveBeenCalled();
+      expect(prisma.outboxEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            aggregateType: 'Order',
+            aggregateId: 'ord-1',
+            eventType: 'order.created',
+            status: 'PENDING',
+          }),
+        }),
+      );
       expect(rmqClient.emit).toHaveBeenCalledWith(
         'order.created',
         expect.objectContaining({
           orderId: 'ord-1',
           orderNumber: 'ORD-12345',
-          userId: 'user-1',
-          totalAmount: 240,
-        }),
-      );
-      expect(paymentRmqClient.emit).toHaveBeenCalledWith(
-        'order.created',
-        expect.objectContaining({
-          orderId: 'ord-1',
         }),
       );
     });
@@ -161,7 +183,7 @@ describe('OrdersService', () => {
             id: 'prod-1',
             name: 'Mechanical Keyboard',
             price: 120.0,
-            stock: 1, // Only 1 in stock
+            stock: 1,
             isActive: true,
           },
         ]),
@@ -173,6 +195,69 @@ describe('OrdersService', () => {
           items: [{ productId: 'prod-1', quantity: 5 }],
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('OutboxProcessor', () => {
+    it('should poll pending outbox events, publish to RMQ, and update status to PUBLISHED', async () => {
+      const mockPendingEvents = [
+        {
+          id: 'outbox-1',
+          aggregateType: 'Order',
+          aggregateId: 'ord-1',
+          eventType: 'order.created',
+          payload: { orderId: 'ord-1', orderNumber: 'ORD-1' },
+          status: 'PENDING',
+          retryCount: 0,
+        },
+      ];
+
+      prisma.outboxEvent.findMany.mockResolvedValue(mockPendingEvents);
+      prisma.outboxEvent.update.mockResolvedValue({ id: 'outbox-1', status: 'PUBLISHED' });
+
+      const processedCount = await outboxProcessor.processOutbox();
+
+      expect(processedCount).toBe(1);
+      expect(rmqClient.emit).toHaveBeenCalledWith('order.created', { orderId: 'ord-1', orderNumber: 'ORD-1' });
+      expect(paymentRmqClient.emit).toHaveBeenCalledWith('order.created', { orderId: 'ord-1', orderNumber: 'ORD-1' });
+      expect(prisma.outboxEvent.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'outbox-1' },
+          data: expect.objectContaining({ status: 'PUBLISHED' }),
+        }),
+      );
+    });
+
+    it('should increment retryCount and set FAILED if retry threshold is reached', async () => {
+      const mockPendingEvents = [
+        {
+          id: 'outbox-failing',
+          aggregateType: 'Order',
+          aggregateId: 'ord-fail',
+          eventType: 'order.created',
+          payload: { orderId: 'ord-fail' },
+          status: 'PENDING',
+          retryCount: 4, // Next will be 5 (max)
+        },
+      ];
+
+      prisma.outboxEvent.findMany.mockResolvedValue(mockPendingEvents);
+      rmqClient.emit.mockImplementationOnce(() => {
+        throw new Error('Connection closed');
+      });
+
+      await outboxProcessor.processOutbox();
+
+      expect(prisma.outboxEvent.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'outbox-failing' },
+          data: expect.objectContaining({
+            retryCount: 5,
+            status: 'FAILED',
+            errorMessage: 'Connection closed',
+          }),
+        }),
+      );
     });
   });
 

@@ -19,3 +19,7 @@ export * from './types/product.types';
 export * from './types/order.types';
 export * from './types/payment.types';
 export * from './types/events.types';
+
+// Resilience Utilities
+export * from './resilience/circuit-breaker';
+export * from './resilience/retry-backoff';

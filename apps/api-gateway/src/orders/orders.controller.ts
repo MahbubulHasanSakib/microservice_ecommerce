@@ -9,12 +9,16 @@ import {
   Patch,
   Post,
   Query,
+  ServiceUnavailableException,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import {
   AuthenticatedUser,
+  CircuitBreaker,
+  CircuitBreakerError,
   ORDER_PATTERNS,
   OrderResponse,
   OrderStatus,
@@ -28,12 +32,19 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
 const RPC_TIMEOUT_MS = 5000;
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
 export class OrdersController {
+  private readonly circuitBreaker = new CircuitBreaker({
+    name: 'OrderServiceCircuitBreaker',
+    failureThreshold: 5,
+    resetTimeoutMs: 10000,
+  });
+
   constructor(
     @Inject(SERVICES.ORDER_SERVICE)
     private readonly orderClient: ClientProxy,
@@ -41,24 +52,36 @@ export class OrdersController {
 
   /**
    * POST /orders
-   * Authenticated: Place a new order. User ID is securely taken from the verified JWT.
+   * Authenticated: Place a new order with idempotency protection and circuit breaker.
    */
   @Post()
+  @UseInterceptors(IdempotencyInterceptor)
   @HttpCode(HttpStatus.CREATED)
   async createOrder(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateOrderDto,
   ): Promise<OrderResponse> {
-    return firstValueFrom(
-      this.orderClient
-        .send<OrderResponse>(ORDER_PATTERNS.CREATE, {
-          userId: user.userId,
-          userEmail: user.email,
-          items: dto.items,
-          shippingAddress: dto.shippingAddress,
-        })
-        .pipe(timeout(RPC_TIMEOUT_MS)),
-    );
+    try {
+      return await this.circuitBreaker.execute(async () => {
+        return await firstValueFrom(
+          this.orderClient
+            .send<OrderResponse>(ORDER_PATTERNS.CREATE, {
+              userId: user.userId,
+              userEmail: user.email,
+              items: dto.items,
+              shippingAddress: dto.shippingAddress,
+            })
+            .pipe(timeout(RPC_TIMEOUT_MS)),
+        );
+      });
+    } catch (err) {
+      if (err instanceof CircuitBreakerError) {
+        throw new ServiceUnavailableException(
+          'Order Service is currently unavailable. Circuit is open; please retry shortly.',
+        );
+      }
+      throw err;
+    }
   }
 
   /**

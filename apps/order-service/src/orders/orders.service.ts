@@ -173,8 +173,9 @@ export class OrdersService {
       }
     }
 
-    // 4. Execute atomic ACID transaction for order and line item creation
+    // 4. Execute atomic ACID transaction for order, line items, and transactional outbox event
     let createdOrder;
+    let eventPayload: OrderCreatedEvent;
     try {
       createdOrder = await this.prisma.$transaction(async (tx) => {
         const order = await tx.order.create({
@@ -198,6 +199,35 @@ export class OrdersService {
           },
           include: {
             items: true,
+          },
+        });
+
+        eventPayload = {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          userId: order.userId,
+          userEmail: dto.userEmail,
+          totalAmount: Number(order.totalAmount),
+          status: order.status as OrderStatus,
+          shippingAddress: order.shippingAddress as Record<string, unknown> | null,
+          items: order.items.map((item) => ({
+            productId: item.productId,
+            productName: item.productName,
+            unitPrice: Number(item.unitPrice),
+            quantity: item.quantity,
+            subtotal: Number(item.subtotal),
+          })),
+          createdAt: order.createdAt,
+        };
+
+        // Transactional Outbox: Write event within same DB transaction
+        await tx.outboxEvent.create({
+          data: {
+            aggregateType: 'Order',
+            aggregateId: order.id,
+            eventType: ORDER_EVENTS.ORDER_CREATED,
+            payload: eventPayload as unknown as Prisma.InputJsonValue,
+            status: 'PENDING',
           },
         });
 
@@ -225,37 +255,25 @@ export class OrdersService {
       throw dbError;
     }
 
-    // 5. Asynchronously publish OrderCreatedEvent to RabbitMQ (Payment & Notification)
+    // 5. Fast-path asynchronous publishing to RabbitMQ (OutboxProcessor acts as reliable fallback)
     try {
-      const eventPayload: OrderCreatedEvent = {
-        orderId: createdOrder.id,
-        orderNumber: createdOrder.orderNumber,
-        userId: createdOrder.userId,
-        userEmail: dto.userEmail,
-        totalAmount: Number(createdOrder.totalAmount),
-        status: createdOrder.status as OrderStatus,
-        shippingAddress: createdOrder.shippingAddress as Record<string, unknown> | null,
-        items: createdOrder.items.map((item) => ({
-          productId: item.productId,
-          productName: item.productName,
-          unitPrice: Number(item.unitPrice),
-          quantity: item.quantity,
-          subtotal: Number(item.subtotal),
-        })),
-        createdAt: createdOrder.createdAt,
-      };
-
-      this.rmqClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload);
+      this.rmqClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
       if (this.paymentRmqClient) {
-        this.paymentRmqClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload);
+        this.paymentRmqClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
       }
+
+      // Mark outbox event as PUBLISHED on successful fast-path emission
+      await this.prisma.outboxEvent.updateMany({
+        where: { aggregateId: createdOrder.id, eventType: ORDER_EVENTS.ORDER_CREATED },
+        data: { status: 'PUBLISHED', publishedAt: new Date() },
+      });
+
       this.logger.log(
         `Dispatched '${ORDER_EVENTS.ORDER_CREATED}' event for order #${createdOrder.orderNumber}`,
       );
     } catch (eventErr) {
-      this.logger.error(
-        `Failed to emit '${ORDER_EVENTS.ORDER_CREATED}' event for order #${createdOrder.orderNumber}: ${(eventErr as Error).message}`,
-        (eventErr as Error).stack,
+      this.logger.warn(
+        `Fast-path emission failed for order #${createdOrder.orderNumber}. OutboxProcessor will deliver in background: ${(eventErr as Error).message}`,
       );
     }
 

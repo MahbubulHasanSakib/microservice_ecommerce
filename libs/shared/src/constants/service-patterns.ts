@@ -90,6 +90,11 @@ export const RABBITMQ_QUEUES = {
   ORDER_QUEUE: 'order.queue',
   PAYMENT_QUEUE: 'payment.queue',
   INVENTORY_QUEUE: 'inventory.queue',
+  // Dead Letter Queues (DLQ)
+  NOTIFICATION_DLQ: 'notification.dlq',
+  ORDER_DLQ: 'order.dlq',
+  PAYMENT_DLQ: 'payment.dlq',
+  INVENTORY_DLQ: 'inventory.dlq',
 } as const;
 
 /**
@@ -100,4 +105,5 @@ export const RABBITMQ_EXCHANGES = {
   NOTIFICATION_EXCHANGE: 'notification.exchange',
   PAYMENT_EXCHANGE: 'payment.exchange',
   INVENTORY_EXCHANGE: 'inventory.exchange',
+  DLX_EXCHANGE: 'dlx.exchange',
 } as const;
