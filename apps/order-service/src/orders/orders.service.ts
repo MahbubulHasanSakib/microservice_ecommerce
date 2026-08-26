@@ -10,6 +10,7 @@ import {
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import {
+  InventoryReservationFailedEvent,
   ORDER_EVENTS,
   OrderCreatedEvent,
   OrderStatus,
@@ -36,11 +37,14 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     @Inject(SERVICES.PRODUCT_SERVICE)
     private readonly productClient: ClientProxy,
-    @Inject(SERVICES.RABBITMQ_SERVICE)
-    private readonly rmqClient: ClientProxy,
+    @Inject(SERVICES.NOTIFICATION_SERVICE)
+    private readonly notificationClient: ClientProxy,
     @Optional()
-    @Inject('PAYMENT_RMQ_CLIENT')
-    private readonly paymentRmqClient?: ClientProxy,
+    @Inject(SERVICES.INVENTORY_SERVICE)
+    private readonly inventoryClient?: ClientProxy,
+    @Optional()
+    @Inject(SERVICES.PAYMENT_SERVICE)
+    private readonly paymentClient?: ClientProxy,
   ) {}
 
   private mapToResponse(
@@ -257,9 +261,12 @@ export class OrdersService {
 
     // 5. Fast-path asynchronous publishing to RabbitMQ (OutboxProcessor acts as reliable fallback)
     try {
-      this.rmqClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
-      if (this.paymentRmqClient) {
-        this.paymentRmqClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
+      this.notificationClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
+      if (this.inventoryClient) {
+        this.inventoryClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
+      }
+      if (this.paymentClient) {
+        this.paymentClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
       }
 
       // Mark outbox event as PUBLISHED on successful fast-path emission
@@ -490,6 +497,40 @@ export class OrdersService {
       this.logger.log(
         `Order #${order.orderNumber} CANCELLED and stock compensated following payment failure.`,
       );
+      return this.mapToResponse(updated);
+    }
+
+    return this.mapToResponse(order);
+  }
+
+  /**
+   * Event-Driven Choreography Handler: Reacts to InventoryReservationFailedEvent.
+   * Updates order status from PENDING to CANCELLED.
+   */
+  async handleInventoryReservationFailed(
+    event: InventoryReservationFailedEvent,
+  ): Promise<OrderResponse | null> {
+    this.logger.warn(
+      `Handling inventory reservation failure for order ID: ${event.orderId}, Reason: ${event.reason}`,
+    );
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: event.orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      this.logger.warn(`Order ${event.orderId} not found when processing inventory.failed`);
+      return null;
+    }
+
+    if (order.status === 'PENDING') {
+      const updated = await this.prisma.order.update({
+        where: { id: event.orderId },
+        data: { status: 'CANCELLED' },
+        include: { items: true },
+      });
+      this.logger.log(`Order #${order.orderNumber} CANCELLED due to out-of-stock inventory.`);
       return this.mapToResponse(updated);
     }
 

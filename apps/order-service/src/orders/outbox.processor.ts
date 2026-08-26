@@ -22,11 +22,14 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(SERVICES.RABBITMQ_SERVICE)
-    private readonly rmqClient: ClientProxy,
+    @Inject(SERVICES.NOTIFICATION_SERVICE)
+    private readonly notificationClient: ClientProxy,
     @Optional()
-    @Inject('PAYMENT_RMQ_CLIENT')
-    private readonly paymentRmqClient?: ClientProxy,
+    @Inject(SERVICES.INVENTORY_SERVICE)
+    private readonly inventoryClient?: ClientProxy,
+    @Optional()
+    @Inject(SERVICES.PAYMENT_SERVICE)
+    private readonly paymentClient?: ClientProxy,
   ) {}
 
   onModuleInit(): void {
@@ -84,11 +87,16 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
           const payload = event.payload as Record<string, unknown>;
 
           // Dispatch to Notification Service queue
-          this.rmqClient.emit(event.eventType, payload);
+          this.notificationClient.emit(event.eventType, payload);
+
+          // Dispatch to Inventory Service queue
+          if (this.inventoryClient) {
+            this.inventoryClient.emit(event.eventType, payload);
+          }
 
           // Dispatch to Payment Service queue
-          if (this.paymentRmqClient) {
-            this.paymentRmqClient.emit(event.eventType, payload);
+          if (this.paymentClient) {
+            this.paymentClient.emit(event.eventType, payload);
           }
 
           // Mark outbox event as successfully published

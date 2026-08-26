@@ -16,4 +16,6 @@ export const validationSchema = Joi.object({
   PRODUCT_SERVICE_PORT: Joi.number().port().default(3003),
   ORDER_SERVICE_HOST: Joi.string().default('localhost'),
   ORDER_SERVICE_PORT: Joi.number().port().default(3004),
+  INVENTORY_SERVICE_HOST: Joi.string().default('localhost'),
+  INVENTORY_SERVICE_PORT: Joi.number().port().default(3006),
 });

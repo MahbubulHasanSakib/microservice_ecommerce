@@ -2,10 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RmqContext } from '@nestjs/microservices';
 import {
-  OrderCreatedEvent,
-  OrderStatus,
   PAYMENT_EVENTS,
   PaymentStatus,
+  SERVICES,
 } from '@ecommerce/shared';
 import { PaymentsService } from '../src/payments/payments.service';
 import { PaymentsController } from '../src/payments/payments.controller';
@@ -22,6 +21,7 @@ describe('Payment Service', () => {
     };
   };
   let orderRmqClient: { emit: jest.Mock };
+  let inventoryRmqClient: { emit: jest.Mock };
   let notificationRmqClient: { emit: jest.Mock };
 
   beforeEach(async () => {
@@ -34,6 +34,7 @@ describe('Payment Service', () => {
     };
 
     orderRmqClient = { emit: jest.fn() };
+    inventoryRmqClient = { emit: jest.fn() };
     notificationRmqClient = { emit: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -41,8 +42,9 @@ describe('Payment Service', () => {
       providers: [
         PaymentsService,
         { provide: PrismaService, useValue: prisma },
-        { provide: 'ORDER_RMQ_CLIENT', useValue: orderRmqClient },
-        { provide: 'NOTIFICATION_RMQ_CLIENT', useValue: notificationRmqClient },
+        { provide: SERVICES.ORDER_SERVICE, useValue: orderRmqClient },
+        { provide: SERVICES.INVENTORY_SERVICE, useValue: inventoryRmqClient },
+        { provide: SERVICES.NOTIFICATION_SERVICE, useValue: notificationRmqClient },
       ],
     }).compile();
 
@@ -253,16 +255,16 @@ describe('Payment Service', () => {
   });
 
   describe('PaymentsController Event Handling', () => {
-    it('should handle order.created event and manually ACK message', async () => {
-      const mockEvent: OrderCreatedEvent = {
+    it('should handle inventory.reserved event, process payment, and manually ACK message', async () => {
+      const mockEvent = {
         orderId: 'ord-100',
         orderNumber: 'ORD-100',
         userId: 'user-123',
         userEmail: 'test@example.com',
-        totalAmount: 150.0,
-        status: OrderStatus.PENDING,
+        amount: 150.0,
+        currency: 'USD',
         items: [],
-        createdAt: new Date(),
+        reservedAt: new Date().toISOString(),
       };
 
       const mockChannel = {
@@ -289,7 +291,7 @@ describe('Payment Service', () => {
         updatedAt: new Date(),
       });
 
-      await controller.handleOrderCreated(mockEvent, mockContext);
+      await controller.handleInventoryReserved(mockEvent, mockContext);
 
       expect(service.processPayment).toHaveBeenCalledWith({
         orderId: 'ord-100',
@@ -297,19 +299,19 @@ describe('Payment Service', () => {
         userId: 'user-123',
         userEmail: 'test@example.com',
         amount: 150.0,
+        currency: 'USD',
       });
       expect(mockChannel.ack).toHaveBeenCalledWith(mockMsg);
     });
 
     it('should NACK without requeue when payment process throws unexpected error', async () => {
-      const mockEvent: OrderCreatedEvent = {
+      const mockEvent = {
         orderId: 'ord-err',
         orderNumber: 'ORD-ERR',
         userId: 'user-123',
-        totalAmount: 150.0,
-        status: OrderStatus.PENDING,
+        amount: 150.0,
         items: [],
-        createdAt: new Date(),
+        reservedAt: new Date().toISOString(),
       };
 
       const mockChannel = {
@@ -325,7 +327,7 @@ describe('Payment Service', () => {
 
       jest.spyOn(service, 'processPayment').mockRejectedValue(new Error('DB connection drop'));
 
-      await controller.handleOrderCreated(mockEvent, mockContext);
+      await controller.handleInventoryReserved(mockEvent, mockContext);
 
       expect(mockChannel.ack).not.toHaveBeenCalled();
       expect(mockChannel.nack).toHaveBeenCalledWith(mockMsg, false, false);

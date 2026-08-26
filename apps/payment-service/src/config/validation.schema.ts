@@ -7,6 +7,7 @@ export const validationSchema = Joi.object({
   RABBITMQ_URL: Joi.string().uri({ scheme: ['amqp', 'amqps'] }).default('amqp://guest:guest@localhost:5672'),
   RABBITMQ_PAYMENT_QUEUE: Joi.string().default('payment.queue'),
   RABBITMQ_ORDER_QUEUE: Joi.string().default('order.queue'),
+  RABBITMQ_INVENTORY_QUEUE: Joi.string().default('inventory.queue'),
   RABBITMQ_NOTIFICATION_QUEUE: Joi.string().default('notification.queue'),
   LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace').default('debug'),
 });

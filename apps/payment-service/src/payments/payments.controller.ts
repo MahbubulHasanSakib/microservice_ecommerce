@@ -1,6 +1,8 @@
 import { Controller, Logger } from '@nestjs/common';
 import { Ctx, EventPattern, MessagePattern, Payload, RmqContext } from '@nestjs/microservices';
 import {
+  INVENTORY_EVENTS,
+  InventoryReservedEvent,
   ORDER_EVENTS,
   OrderCreatedEvent,
   PAYMENT_PATTERNS,
@@ -16,8 +18,44 @@ export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   /**
-   * Event Consumer: Reacts asynchronously to OrderCreatedEvent.
-   * Charges payment and publishes PaymentSucceeded / PaymentFailed.
+   * Event Consumer: Reacts asynchronously to InventoryReservedEvent (Saga Step 3).
+   * Charges payment only after stock has been verified and reserved.
+   */
+  @EventPattern(INVENTORY_EVENTS.INVENTORY_RESERVED)
+  async handleInventoryReserved(
+    @Payload() data: InventoryReservedEvent,
+    @Ctx() context: RmqContext,
+  ): Promise<void> {
+    const channel = context.getChannelRef();
+    const originalMsg = context.getMessage();
+
+    try {
+      this.logger.log(
+        `Saga Step 3: Received '${INVENTORY_EVENTS.INVENTORY_RESERVED}' for order #${data?.orderNumber || data?.orderId}`,
+      );
+
+      await this.paymentsService.processPayment({
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        userId: data.userId,
+        userEmail: data.userEmail,
+        amount: data.amount,
+        currency: data.currency,
+      });
+
+      channel.ack(originalMsg);
+      this.logger.debug(`Acknowledged inventory.reserved event in payment service for #${data?.orderNumber}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to process payment for order ${data?.orderId}: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+      channel.nack(originalMsg, false, false);
+    }
+  }
+
+  /**
+   * Event Consumer: Legacy / Direct fallback for OrderCreatedEvent.
    */
   @EventPattern(ORDER_EVENTS.ORDER_CREATED)
   async handleOrderCreated(
@@ -32,23 +70,10 @@ export class PaymentsController {
         `Received event '${ORDER_EVENTS.ORDER_CREATED}' for order #${data?.orderNumber || data?.orderId}`,
       );
 
-      await this.paymentsService.processPayment({
-        orderId: data.orderId,
-        orderNumber: data.orderNumber,
-        userId: data.userId,
-        userEmail: data.userEmail,
-        amount: data.totalAmount,
-      });
-
-      // Explicit manual acknowledgment
+      // In Saga Phase 7, stock reservation triggers payment. If received directly, we acknowledge it safely.
       channel.ack(originalMsg);
-      this.logger.debug(`Acknowledged order.created event for payment processing #${data?.orderNumber}`);
+      this.logger.debug(`Acknowledged direct order.created event in payment service #${data?.orderNumber}`);
     } catch (error) {
-      this.logger.error(
-        `Failed to process payment for order ${data?.orderId}: ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      // NACK without requeue
       channel.nack(originalMsg, false, false);
     }
   }

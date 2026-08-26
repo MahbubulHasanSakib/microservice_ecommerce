@@ -18,6 +18,7 @@ export * from './types/pagination.types';
 export * from './types/product.types';
 export * from './types/order.types';
 export * from './types/payment.types';
+export * from './types/inventory.types';
 export * from './types/events.types';
 
 // Resilience Utilities

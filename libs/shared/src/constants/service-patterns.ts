@@ -62,6 +62,18 @@ export const PAYMENT_PATTERNS = {
 } as const;
 
 /**
+ * Message patterns for Inventory Service TCP communication.
+ */
+export const INVENTORY_PATTERNS = {
+  RESERVE: 'inventory.reserve',
+  RELEASE: 'inventory.release',
+  CHECK_STOCK: 'inventory.check_stock',
+  GET_BY_PRODUCT_ID: 'inventory.get_by_product_id',
+  RESTOCK: 'inventory.restock',
+  LIST: 'inventory.list',
+} as const;
+
+/**
  * Domain Event patterns for asynchronous RabbitMQ messaging (Order).
  */
 export const ORDER_EVENTS = {
@@ -70,6 +82,15 @@ export const ORDER_EVENTS = {
   ORDER_CANCELLED: 'order.cancelled',
   ORDER_SHIPPED: 'order.shipped',
   ORDER_DELIVERED: 'order.delivered',
+} as const;
+
+/**
+ * Domain Event patterns for asynchronous RabbitMQ messaging (Inventory).
+ */
+export const INVENTORY_EVENTS = {
+  INVENTORY_RESERVED: 'inventory.reserved',
+  INVENTORY_FAILED: 'inventory.failed',
+  INVENTORY_RELEASED: 'inventory.released',
 } as const;
 
 /**

@@ -116,3 +116,57 @@ export interface SendNotificationPayload {
   template: string;
   context: Record<string, unknown>;
 }
+
+/**
+ * InventoryReservedEvent Payload
+ *
+ * Published by Inventory Service when stock is successfully reserved for an order.
+ * Consumed by Payment Service (to trigger payment charge).
+ */
+export interface InventoryReservedEvent {
+  orderId: string;
+  orderNumber?: string;
+  userId: string;
+  userEmail?: string;
+  amount: number;
+  currency?: string;
+  items: EventOrderItem[];
+  reservedAt: Date | string;
+}
+
+/**
+ * InventoryReservationFailedEvent Payload
+ *
+ * Published by Inventory Service when insufficient stock prevents order fulfillment.
+ * Consumed by Order Service (to cancel order) and Notification Service (to alert user).
+ */
+export interface InventoryReservationFailedEvent {
+  orderId: string;
+  orderNumber?: string;
+  userId: string;
+  userEmail?: string;
+  reason: string;
+  failedItems: {
+    productId: string;
+    requestedQuantity: number;
+    availableStock: number;
+  }[];
+  timestamp: Date | string;
+}
+
+/**
+ * InventoryReleasedEvent Payload
+ *
+ * Published by Inventory Service when reserved stock is released (compensating transaction).
+ */
+export interface InventoryReleasedEvent {
+  orderId: string;
+  orderNumber?: string;
+  reason: string;
+  releasedItems: {
+    productId: string;
+    quantity: number;
+  }[];
+  releasedAt: Date | string;
+}
+

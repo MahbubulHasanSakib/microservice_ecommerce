@@ -14,6 +14,7 @@ import {
   PaymentStatus,
   PaymentSucceededEvent,
   ProcessPaymentDto,
+  SERVICES,
 } from '@ecommerce/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../../prisma/client';
@@ -24,9 +25,11 @@ export class PaymentsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject('ORDER_RMQ_CLIENT')
+    @Inject(SERVICES.ORDER_SERVICE)
     private readonly orderRmqClient: ClientProxy,
-    @Inject('NOTIFICATION_RMQ_CLIENT')
+    @Inject(SERVICES.INVENTORY_SERVICE)
+    private readonly inventoryRmqClient: ClientProxy,
+    @Inject(SERVICES.NOTIFICATION_SERVICE)
     private readonly notificationRmqClient: ClientProxy,
   ) {}
 
@@ -113,6 +116,7 @@ export class PaymentsService {
 
       try {
         this.orderRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, failedEvent);
+        this.inventoryRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, failedEvent);
         this.notificationRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, failedEvent);
         this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_FAILED}' for order ${dto.orderId}`);
       } catch (err) {

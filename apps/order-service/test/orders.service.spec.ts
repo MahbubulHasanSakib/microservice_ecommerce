@@ -33,6 +33,9 @@ describe('OrdersService & Transactional Outbox', () => {
   let rmqClient: {
     emit: jest.Mock;
   };
+  let inventoryClient: {
+    emit: jest.Mock;
+  };
   let paymentRmqClient: {
     emit: jest.Mock;
   };
@@ -64,6 +67,10 @@ describe('OrdersService & Transactional Outbox', () => {
       emit: jest.fn(),
     };
 
+    inventoryClient = {
+      emit: jest.fn(),
+    };
+
     paymentRmqClient = {
       emit: jest.fn(),
     };
@@ -81,11 +88,15 @@ describe('OrdersService & Transactional Outbox', () => {
           useValue: productClient,
         },
         {
-          provide: SERVICES.RABBITMQ_SERVICE,
+          provide: SERVICES.NOTIFICATION_SERVICE,
           useValue: rmqClient,
         },
         {
-          provide: 'PAYMENT_RMQ_CLIENT',
+          provide: SERVICES.INVENTORY_SERVICE,
+          useValue: inventoryClient,
+        },
+        {
+          provide: SERVICES.PAYMENT_SERVICE,
           useValue: paymentRmqClient,
         },
       ],

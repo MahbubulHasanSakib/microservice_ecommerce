@@ -24,4 +24,8 @@ export const configuration = () => ({
     host: process.env['ORDER_SERVICE_HOST'] ?? 'localhost',
     port: parseInt(process.env['ORDER_SERVICE_PORT'] ?? '3004', 10),
   },
+  inventoryService: {
+    host: process.env['INVENTORY_SERVICE_HOST'] ?? 'localhost',
+    port: parseInt(process.env['INVENTORY_SERVICE_PORT'] ?? '3006', 10),
+  },
 });

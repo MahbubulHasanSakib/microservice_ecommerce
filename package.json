@@ -12,7 +12,8 @@
     "format:check": "prettier --check \"{apps,libs}/**/*.ts\"",
     "test": "npm run test --workspaces --if-present",
     "build:shared": "npm run build --workspace=@ecommerce/shared",
-    "build:apps": "npm run build --workspace=@ecommerce/user-service && npm run build --workspace=@ecommerce/auth-service && npm run build --workspace=@ecommerce/product-service && npm run build --workspace=@ecommerce/order-service && npm run build --workspace=@ecommerce/payment-service && npm run build --workspace=@ecommerce/notification-service && npm run build --workspace=@ecommerce/api-gateway",
+    "build:inventory": "npm run build --workspace=@ecommerce/inventory-service",
+    "build:apps": "npm run build --workspace=@ecommerce/user-service && npm run build --workspace=@ecommerce/auth-service && npm run build --workspace=@ecommerce/product-service && npm run build --workspace=@ecommerce/order-service && npm run build --workspace=@ecommerce/inventory-service && npm run build --workspace=@ecommerce/payment-service && npm run build --workspace=@ecommerce/notification-service && npm run build --workspace=@ecommerce/api-gateway",
     "build": "npm run build:shared && npm run build:apps",
     "type-check": "npm run type-check --workspaces --if-present",
     "start:gateway": "npm run start:dev --workspace=@ecommerce/api-gateway",
@@ -20,9 +21,10 @@
     "start:user": "npm run start:dev --workspace=@ecommerce/user-service",
     "start:product": "npm run start:dev --workspace=@ecommerce/product-service",
     "start:order": "npm run start:dev --workspace=@ecommerce/order-service",
+    "start:inventory": "npm run start:dev --workspace=@ecommerce/inventory-service",
     "start:payment": "npm run start:dev --workspace=@ecommerce/payment-service",
     "start:notification": "npm run start:dev --workspace=@ecommerce/notification-service",
-    "start:all": "concurrently -k -p \"[{name}]\" -n \"GATEWAY,AUTH,USER,PRODUCT,ORDER,PAYMENT,NOTIF\" -c \"cyan,magenta,blue,yellow,green,white,red\" \"npm:start:gateway\" \"npm:start:auth\" \"npm:start:user\" \"npm:start:product\" \"npm:start:order\" \"npm:start:payment\" \"npm:start:notification\""
+    "start:all": "concurrently -k -p \"[{name}]\" -n \"GATEWAY,AUTH,USER,PRODUCT,ORDER,INVENTORY,PAYMENT,NOTIF\" -c \"cyan,magenta,blue,yellow,green,gray,white,red\" \"npm:start:gateway\" \"npm:start:auth\" \"npm:start:user\" \"npm:start:product\" \"npm:start:order\" \"npm:start:inventory\" \"npm:start:payment\" \"npm:start:notification\""
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

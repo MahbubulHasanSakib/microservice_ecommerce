@@ -10,6 +10,7 @@ export default () => ({
     url: process.env.RABBITMQ_URL ?? 'amqp://guest:guest@localhost:5672',
     paymentQueue: process.env.RABBITMQ_PAYMENT_QUEUE ?? 'payment.queue',
     orderQueue: process.env.RABBITMQ_ORDER_QUEUE ?? 'order.queue',
+    inventoryQueue: process.env.RABBITMQ_INVENTORY_QUEUE ?? 'inventory.queue',
     notificationQueue: process.env.RABBITMQ_NOTIFICATION_QUEUE ?? 'notification.queue',
   },
   logLevel: process.env.LOG_LEVEL ?? 'debug',

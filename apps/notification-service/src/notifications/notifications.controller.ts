@@ -1,6 +1,8 @@
 import { Controller, Logger } from '@nestjs/common';
 import { Ctx, EventPattern, Payload, RmqContext } from '@nestjs/microservices';
 import {
+  INVENTORY_EVENTS,
+  InventoryReservationFailedEvent,
   ORDER_EVENTS,
   OrderCreatedEvent,
   PAYMENT_EVENTS,
@@ -90,6 +92,32 @@ export class NotificationsController {
     } catch (error) {
       this.logger.error(
         `Failed to process event '${PAYMENT_EVENTS.PAYMENT_FAILED}': ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+      channel.nack(originalMsg, false, false);
+    }
+  }
+
+  @EventPattern(INVENTORY_EVENTS.INVENTORY_FAILED)
+  async handleInventoryFailed(
+    @Payload() data: InventoryReservationFailedEvent,
+    @Ctx() context: RmqContext,
+  ): Promise<void> {
+    const channel = context.getChannelRef();
+    const originalMsg = context.getMessage();
+
+    try {
+      this.logger.log(
+        `Received event '${INVENTORY_EVENTS.INVENTORY_FAILED}' for order ID: ${data?.orderId || 'unknown'}`,
+      );
+
+      await this.notificationsService.processInventoryFailed(data);
+
+      channel.ack(originalMsg);
+      this.logger.debug(`Acknowledged inventory.failed message for order ${data?.orderNumber}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to process event '${INVENTORY_EVENTS.INVENTORY_FAILED}': ${(error as Error).message}`,
         (error as Error).stack,
       );
       channel.nack(originalMsg, false, false);
