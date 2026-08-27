@@ -1,29 +1,56 @@
 import { CallHandler, ConflictException, ExecutionContext } from '@nestjs/common';
 import { of, throwError } from 'rxjs';
 import { IdempotencyInterceptor } from '../src/common/interceptors/idempotency.interceptor';
+import { RedisService } from '../src/common/redis/redis.service';
+import { IdempotencyStatus } from '@ecommerce/shared';
 
 describe('IdempotencyInterceptor', () => {
   let interceptor: IdempotencyInterceptor;
+  let redisService: {
+    getIdempotencyRecord: jest.Mock;
+    createPendingIdempotency: jest.Mock;
+    resolveIdempotency: jest.Mock;
+    failIdempotency: jest.Mock;
+  };
 
   beforeEach(() => {
-    interceptor = new IdempotencyInterceptor();
+    redisService = {
+      getIdempotencyRecord: jest.fn().mockResolvedValue(null),
+      createPendingIdempotency: jest.fn().mockResolvedValue(true),
+      resolveIdempotency: jest.fn().mockResolvedValue(undefined),
+      failIdempotency: jest.fn().mockResolvedValue(undefined),
+    };
+
+    interceptor = new IdempotencyInterceptor(redisService as unknown as RedisService);
   });
 
-  const createMockContext = (idempotencyKey?: string, userId: string = 'user-1'): ExecutionContext => {
+  const createMockContext = (
+    idempotencyKey?: string,
+    userId: string = 'user-1',
+    method: string = 'POST',
+  ): ExecutionContext => {
     const headers: Record<string, string> = {};
     if (idempotencyKey) {
-      headers['x-idempotency-key'] = idempotencyKey;
+      headers['idempotency-key'] = idempotencyKey;
     }
 
     const responseHeaders: Record<string, string> = {};
+    let statusCode = 200;
 
     return {
       switchToHttp: () => ({
         getRequest: () => ({
+          method,
+          path: '/api/v1/orders',
           headers,
-          user: { userId },
+          user: { id: userId },
         }),
         getResponse: () => ({
+          statusCode,
+          status: (code: number) => {
+            statusCode = code;
+            return this;
+          },
           setHeader: (k: string, v: string) => {
             responseHeaders[k] = v;
           },
@@ -32,95 +59,95 @@ describe('IdempotencyInterceptor', () => {
     } as unknown as ExecutionContext;
   };
 
-  it('should pass through without caching if no x-idempotency-key header', (done) => {
+  it('should pass through without checking Redis if no idempotency-key header', async () => {
     const context = createMockContext();
     const handler: CallHandler = {
       handle: () => of({ data: 'response-1' }),
     };
 
-    interceptor.intercept(context, handler).subscribe({
-      next: (val) => {
-        expect(val).toEqual({ data: 'response-1' });
-        done();
-      },
+    const observable = await interceptor.intercept(context, handler);
+    observable.subscribe((val) => {
+      expect(val).toEqual({ data: 'response-1' });
+      expect(redisService.getIdempotencyRecord).not.toHaveBeenCalled();
     });
   });
 
-  it('should cache and return previous response on duplicate request with same idempotency key', (done) => {
-    const context = createMockContext('key-123', 'user-1');
-    let callCount = 0;
+  it('should pass through for GET requests even if header is present', async () => {
+    const context = createMockContext('key-123', 'user-1', 'GET');
     const handler: CallHandler = {
-      handle: () => {
-        callCount++;
-        return of({ id: 'order-123', total: 200 });
-      },
+      handle: () => of({ data: 'get-response' }),
     };
 
-    // First request
-    interceptor.intercept(context, handler).subscribe({
-      next: (val1) => {
-        expect(val1).toEqual({ id: 'order-123', total: 200 });
-        expect(callCount).toBe(1);
-
-        // Second request with SAME key
-        interceptor.intercept(context, handler).subscribe({
-          next: (val2) => {
-            expect(val2).toEqual({ id: 'order-123', total: 200 });
-            expect(callCount).toBe(1); // Downstream handler was NOT called again
-            done();
-          },
-        });
-      },
+    const observable = await interceptor.intercept(context, handler);
+    observable.subscribe((val) => {
+      expect(val).toEqual({ data: 'get-response' });
+      expect(redisService.createPendingIdempotency).not.toHaveBeenCalled();
     });
   });
 
-  it('should throw ConflictException if duplicate request arrives while previous is still in-progress', () => {
+  it('should create pending idempotency record on first request and resolve on completion', async () => {
+    const context = createMockContext('key-123', 'user-1');
+    const handler: CallHandler = {
+      handle: () => of({ id: 'order-123', total: 200 }),
+    };
+
+    const observable = await interceptor.intercept(context, handler);
+    observable.subscribe((val) => {
+      expect(val).toEqual({ id: 'order-123', total: 200 });
+      expect(redisService.createPendingIdempotency).toHaveBeenCalledWith('user:user-1:key-123', 60);
+      expect(redisService.resolveIdempotency).toHaveBeenCalledWith(
+        'user:user-1:key-123',
+        expect.objectContaining({ body: { id: 'order-123', total: 200 } }),
+        86400,
+      );
+    });
+  });
+
+  it('should replay cached response when record is already RESOLVED', async () => {
+    const context = createMockContext('key-123', 'user-1');
+    redisService.getIdempotencyRecord.mockResolvedValue({
+      status: IdempotencyStatus.RESOLVED,
+      statusCode: 201,
+      body: { id: 'cached-order-123' },
+      createdAt: Date.now(),
+    });
+
+    const handler: CallHandler = {
+      handle: jest.fn(),
+    };
+
+    const observable = await interceptor.intercept(context, handler);
+    observable.subscribe((val) => {
+      expect(val).toEqual({ id: 'cached-order-123' });
+      expect(handler.handle).not.toHaveBeenCalled();
+    });
+  });
+
+  it('should throw ConflictException if duplicate request arrives while previous is PENDING', async () => {
     const context = createMockContext('key-in-flight', 'user-1');
-    const slowHandler: CallHandler = {
+    redisService.getIdempotencyRecord.mockResolvedValue({
+      status: IdempotencyStatus.PENDING,
+      createdAt: Date.now(),
+    });
+
+    const handler: CallHandler = {
       handle: () => of({ done: true }),
     };
 
-    // Start first request
-    interceptor.intercept(context, slowHandler);
-
-    // Concurrently try a duplicate request with the same key
-    expect(() => {
-      interceptor.intercept(context, slowHandler);
-    }).toThrow(ConflictException);
+    await expect(interceptor.intercept(context, handler)).rejects.toThrow(ConflictException);
   });
 
-  it('should release key and allow retry if first attempt failed with error', (done) => {
+  it('should call failIdempotency if request handler throws an error', async () => {
     const context = createMockContext('key-fail', 'user-1');
-    let callCount = 0;
-
-    const failingHandler: CallHandler = {
-      handle: () => {
-        callCount++;
-        return throwError(() => new Error('DB connection error'));
-      },
+    const handler: CallHandler = {
+      handle: () => throwError(() => new Error('Service down')),
     };
 
-    const succeedingHandler: CallHandler = {
-      handle: () => {
-        callCount++;
-        return of({ id: 'order-success' });
-      },
-    };
-
-    // First attempt fails
-    interceptor.intercept(context, failingHandler).subscribe({
+    const observable = await interceptor.intercept(context, handler);
+    observable.subscribe({
       error: (err) => {
-        expect(err.message).toBe('DB connection error');
-        expect(callCount).toBe(1);
-
-        // Second attempt with SAME key should be allowed because previous failed
-        interceptor.intercept(context, succeedingHandler).subscribe({
-          next: (val) => {
-            expect(val).toEqual({ id: 'order-success' });
-            expect(callCount).toBe(2);
-            done();
-          },
-        });
+        expect(err.message).toBe('Service down');
+        expect(redisService.failIdempotency).toHaveBeenCalledWith('user:user-1:key-fail');
       },
     });
   });

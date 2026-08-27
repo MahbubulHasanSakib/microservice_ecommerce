@@ -6,6 +6,7 @@ import { LoggerModule } from './common/logger/logger.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { RedisModule } from '@ecommerce/shared';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { InventoryModule } from './inventory/inventory.module';
     }),
     LoggerModule,
     PrismaModule,
+    RedisModule,
     HealthModule,
     InventoryModule,
   ],

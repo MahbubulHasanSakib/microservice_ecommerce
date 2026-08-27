@@ -7,6 +7,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ProductsModule } from './products/products.module';
+import { RedisModule } from '@ecommerce/shared';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ProductsModule } from './products/products.module';
     }),
     LoggerModule,
     PrismaModule,
+    RedisModule,
     HealthModule,
     CategoriesModule,
     ProductsModule,

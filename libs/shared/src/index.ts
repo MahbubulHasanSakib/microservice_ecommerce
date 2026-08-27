@@ -24,3 +24,8 @@ export * from './types/events.types';
 // Resilience Utilities
 export * from './resilience/circuit-breaker';
 export * from './resilience/retry-backoff';
+
+// Redis Utilities
+export * from './types/redis.types';
+export * from './redis/redis.service';
+export * from './redis/redis.module';

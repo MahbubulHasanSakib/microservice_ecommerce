@@ -7,4 +7,6 @@ export const validationSchema = Joi.object({
   TCP_PORT: Joi.number().port().default(3003),
   HTTP_PORT: Joi.number().port().default(3013),
   DATABASE_URL: Joi.string().required(),
+  REDIS_HOST: Joi.string().default('localhost'),
+  REDIS_PORT: Joi.number().port().default(6379),
 });

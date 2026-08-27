@@ -14,6 +14,8 @@ export const validationSchema = Joi.object({
   RABBITMQ_ORDER_QUEUE: Joi.string().default('order.queue'),
   RABBITMQ_PAYMENT_QUEUE: Joi.string().default('payment.queue'),
   RABBITMQ_NOTIFICATION_QUEUE: Joi.string().default('notification.queue'),
+  REDIS_HOST: Joi.string().default('localhost'),
+  REDIS_PORT: Joi.number().port().default(6379),
   LOG_LEVEL: Joi.string()
     .valid('fatal', 'error', 'warn', 'info', 'debug', 'trace')
     .default('debug'),

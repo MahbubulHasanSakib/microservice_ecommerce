@@ -1,11 +1,16 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
-import { CategoryResponse } from '@ecommerce/shared';
+import { CategoryResponse, RedisService } from '@ecommerce/shared';
 
 @Injectable()
 export class CategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(CategoriesService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   async create(dto: CreateCategoryDto): Promise<CategoryResponse> {
     const existing = await this.prisma.category.findUnique({
@@ -24,6 +29,14 @@ export class CategoriesService {
       },
     });
 
+    // Invalidate categories cache and product list cache
+    await Promise.all([
+      this.redis.delCache('categories:all'),
+      this.redis.delCachePattern('products:list:*'),
+    ]).catch((err) => {
+      this.logger.warn(`Failed to evict category cache: ${err.message}`);
+    });
+
     return category;
   }
 
@@ -40,8 +53,22 @@ export class CategoriesService {
   }
 
   async findAll(): Promise<CategoryResponse[]> {
-    return this.prisma.category.findMany({
+    const cacheKey = 'categories:all';
+    const cached = await this.redis.getCache<CategoryResponse[]>(cacheKey);
+    if (cached) {
+      this.logger.debug('Cache HIT for categories:all');
+      return cached;
+    }
+
+    const categories = await this.prisma.category.findMany({
       orderBy: { name: 'asc' },
     });
+
+    // Cache categories for 30 minutes with jitter
+    await this.redis.setCache(cacheKey, categories, 1800).catch((err) => {
+      this.logger.warn(`Failed to cache categories: ${err.message}`);
+    });
+
+    return categories;
   }
 }

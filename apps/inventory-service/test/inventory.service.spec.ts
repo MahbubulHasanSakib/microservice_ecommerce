@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { SERVICES } from '@ecommerce/shared';
+import { RedisService, SERVICES } from '@ecommerce/shared';
 import { InventoryService } from '../src/inventory/inventory.service';
 import { InventoryController } from '../src/inventory/inventory.controller';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -21,6 +21,11 @@ describe('Inventory Service', () => {
     };
     $transaction: jest.Mock;
   };
+  let redis: {
+    withLock: jest.Mock;
+    acquireLock: jest.Mock;
+    releaseLock: jest.Mock;
+  };
   let orderRmqClient: { emit: jest.Mock };
   let paymentRmqClient: { emit: jest.Mock };
   let notificationRmqClient: { emit: jest.Mock };
@@ -41,6 +46,12 @@ describe('Inventory Service', () => {
       $transaction: jest.fn(),
     };
 
+    redis = {
+      withLock: jest.fn().mockImplementation((_resource, _ttl, action) => action()),
+      acquireLock: jest.fn().mockResolvedValue('token-123'),
+      releaseLock: jest.fn().mockResolvedValue(true),
+    };
+
     orderRmqClient = { emit: jest.fn() };
     paymentRmqClient = { emit: jest.fn() };
     notificationRmqClient = { emit: jest.fn() };
@@ -50,6 +61,7 @@ describe('Inventory Service', () => {
       providers: [
         InventoryService,
         { provide: PrismaService, useValue: prisma },
+        { provide: RedisService, useValue: redis },
         { provide: SERVICES.ORDER_SERVICE, useValue: orderRmqClient },
         { provide: SERVICES.PAYMENT_SERVICE, useValue: paymentRmqClient },
         { provide: SERVICES.NOTIFICATION_SERVICE, useValue: notificationRmqClient },
@@ -106,6 +118,35 @@ describe('Inventory Service', () => {
       expect(result).toHaveLength(2);
       expect(result[0]).toEqual({ productId: 'prod-1', availableStock: 7, isAvailable: true });
       expect(result[1]).toEqual({ productId: 'prod-2', availableStock: 0, isAvailable: false });
+    });
+  });
+
+  describe('reserveStock (Distributed Lock)', () => {
+    it('should acquire distributed lock and reserve stock atomically', async () => {
+      prisma.stockReservation.findMany.mockResolvedValue([]);
+      prisma.$transaction.mockImplementation(async (callback) => {
+        const tx = {
+          inventoryItem: {
+            findMany: jest.fn().mockResolvedValue([
+              { productId: 'prod-1', stockOnHand: 10, reservedStock: 0 },
+            ]),
+            update: jest.fn().mockResolvedValue({}),
+          },
+          stockReservation: {
+            upsert: jest.fn().mockResolvedValue({}),
+          },
+        };
+        return callback(tx);
+      });
+
+      const result = await service.reserveStock({
+        orderId: 'ord-123',
+        orderNumber: 'ORD-123',
+        items: [{ productId: 'prod-1', quantity: 2 }],
+      });
+
+      expect(redis.withLock).toHaveBeenCalledWith('inventory:products:prod-1', 5000, expect.any(Function));
+      expect(result.success).toBe(true);
     });
   });
 });

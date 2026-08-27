@@ -12,6 +12,10 @@ export interface InventoryServiceConfig {
     paymentQueue: string;
     notificationQueue: string;
   };
+  redis: {
+    host: string;
+    port: number;
+  };
   logLevel: string;
 }
 
@@ -30,6 +34,10 @@ export const configuration = (): InventoryServiceConfig => ({
     orderQueue: process.env.RABBITMQ_ORDER_QUEUE ?? 'order.queue',
     paymentQueue: process.env.RABBITMQ_PAYMENT_QUEUE ?? 'payment.queue',
     notificationQueue: process.env.RABBITMQ_NOTIFICATION_QUEUE ?? 'notification.queue',
+  },
+  redis: {
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
   },
   logLevel: process.env.LOG_LEVEL ?? 'debug',
 });

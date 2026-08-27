@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,12 +10,17 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { UpdateStockDto } from './dto/update-stock.dto';
-import { PaginatedResult, ProductResponse } from '@ecommerce/shared';
+import { PaginatedResult, ProductResponse, RedisService } from '@ecommerce/shared';
 import { Prisma } from '../../prisma/client';
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ProductsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   private mapToResponse(
     product: Prisma.ProductGetPayload<{ include: { category: true } }>,
@@ -80,7 +86,13 @@ export class ProductsService {
       include: { category: true },
     });
 
-    return this.mapToResponse(product);
+    const response = this.mapToResponse(product);
+    // Invalidate product listings cache
+    await this.redis.delCachePattern('products:list:*').catch((err) => {
+      this.logger.warn(`Failed to evict products:list cache: ${err.message}`);
+    });
+
+    return response;
   }
 
   async update(id: string, dto: UpdateProductDto): Promise<ProductResponse> {
@@ -133,7 +145,17 @@ export class ProductsService {
       include: { category: true },
     });
 
-    return this.mapToResponse(updated);
+    const response = this.mapToResponse(updated);
+
+    // Evict cached individual product and listings
+    await Promise.all([
+      this.redis.delCache(`product:${id}`),
+      this.redis.delCachePattern('products:list:*'),
+    ]).catch((err) => {
+      this.logger.warn(`Failed to evict cache on product update: ${err.message}`);
+    });
+
+    return response;
   }
 
   async delete(id: string): Promise<{ success: boolean; message: string }> {
@@ -148,10 +170,25 @@ export class ProductsService {
       where: { id },
     });
 
+    // Invalidate product cache
+    await Promise.all([
+      this.redis.delCache(`product:${id}`),
+      this.redis.delCachePattern('products:list:*'),
+    ]).catch((err) => {
+      this.logger.warn(`Failed to evict cache on product delete: ${err.message}`);
+    });
+
     return { success: true, message: `Product ${id} deleted successfully` };
   }
 
   async findById(id: string): Promise<ProductResponse> {
+    const cacheKey = `product:${id}`;
+    const cached = await this.redis.getCache<ProductResponse>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache HIT for product ${id}`);
+      return cached;
+    }
+
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: { category: true },
@@ -161,7 +198,13 @@ export class ProductsService {
       throw new NotFoundException(`Product with ID '${id}' not found`);
     }
 
-    return this.mapToResponse(product);
+    const response = this.mapToResponse(product);
+    // Cache for 10 minutes with jitter
+    await this.redis.setCache(cacheKey, response, 600).catch((err) => {
+      this.logger.warn(`Failed to populate product cache: ${err.message}`);
+    });
+
+    return response;
   }
 
   async findByIds(ids: string[]): Promise<ProductResponse[]> {
@@ -176,6 +219,13 @@ export class ProductsService {
   }
 
   async findAll(query: QueryProductsDto): Promise<PaginatedResult<ProductResponse>> {
+    const cacheKey = `products:list:${JSON.stringify(query)}`;
+    const cached = await this.redis.getCache<PaginatedResult<ProductResponse>>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache HIT for query products list`);
+      return cached;
+    }
+
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
@@ -213,7 +263,7 @@ export class ProductsService {
 
     const totalPages = Math.ceil(total / limit) || 1;
 
-    return {
+    const result: PaginatedResult<ProductResponse> = {
       data: products.map((p) => this.mapToResponse(p)),
       meta: {
         total,
@@ -224,6 +274,13 @@ export class ProductsService {
         hasPrevPage: page > 1,
       },
     };
+
+    // Cache list query for 2 minutes
+    await this.redis.setCache(cacheKey, result, 120).catch((err) => {
+      this.logger.warn(`Failed to populate products:list cache: ${err.message}`);
+    });
+
+    return result;
   }
 
   async updateStock(dto: UpdateStockDto): Promise<ProductResponse> {
@@ -284,6 +341,16 @@ export class ProductsService {
       include: { category: true },
     });
 
-    return this.mapToResponse(updatedProduct!);
+    const response = this.mapToResponse(updatedProduct!);
+
+    // Evict cached product and listings
+    await Promise.all([
+      this.redis.delCache(`product:${dto.productId}`),
+      this.redis.delCachePattern('products:list:*'),
+    ]).catch((err) => {
+      this.logger.warn(`Failed to evict cache on stock update: ${err.message}`);
+    });
+
+    return response;
   }
 }

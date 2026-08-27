@@ -20,6 +20,7 @@ import {
   RestockDto,
   SERVICES,
   StockAvailabilityResponse,
+  RedisService,
 } from '@ecommerce/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../../prisma/client';
@@ -30,6 +31,7 @@ export class InventoryService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
     @Inject(SERVICES.ORDER_SERVICE)
     private readonly orderRmqClient: ClientProxy,
     @Inject(SERVICES.PAYMENT_SERVICE)
@@ -142,69 +144,74 @@ export class InventoryService {
       }
     }
 
-    // 2. Perform atomic reservation in a Prisma transaction
+    // 2. Perform atomic reservation inside a distributed lock with Prisma transaction
+    const sortedProductIds = [...new Set(dto.items.map((i) => i.productId))].sort();
+    const lockKey = `inventory:products:${sortedProductIds.join(':')}`;
+
     try {
-      await this.prisma.$transaction(async (tx) => {
-        const productIds = dto.items.map((i) => i.productId);
-        const inventoryItems = await tx.inventoryItem.findMany({
-          where: { productId: { in: productIds } },
-        });
-
-        const inventoryMap = new Map(inventoryItems.map((item) => [item.productId, item]));
-        const failedItems: { productId: string; requestedQuantity: number; availableStock: number }[] = [];
-
-        // Verify stock sufficiency for every item
-        for (const reqItem of dto.items) {
-          const invItem = inventoryMap.get(reqItem.productId);
-          const availableStock = invItem ? invItem.stockOnHand - invItem.reservedStock : 0;
-
-          if (!invItem || availableStock < reqItem.quantity) {
-            failedItems.push({
-              productId: reqItem.productId,
-              requestedQuantity: reqItem.quantity,
-              availableStock,
-            });
-          }
-        }
-
-        if (failedItems.length > 0) {
-          throw new BadRequestException(
-            `Insufficient stock for products: ${failedItems.map((f) => f.productId).join(', ')}`,
-          );
-        }
-
-        // Apply reservations
-        for (const reqItem of dto.items) {
-          await tx.inventoryItem.update({
-            where: { productId: reqItem.productId },
-            data: {
-              reservedStock: { increment: reqItem.quantity },
-            },
+      return await this.redis.withLock(lockKey, 5000, async () => {
+        await this.prisma.$transaction(async (tx) => {
+          const productIds = dto.items.map((i) => i.productId);
+          const inventoryItems = await tx.inventoryItem.findMany({
+            where: { productId: { in: productIds } },
           });
 
-          await tx.stockReservation.upsert({
-            where: {
-              orderId_productId: {
+          const inventoryMap = new Map(inventoryItems.map((item) => [item.productId, item]));
+          const failedItems: { productId: string; requestedQuantity: number; availableStock: number }[] = [];
+
+          // Verify stock sufficiency for every item
+          for (const reqItem of dto.items) {
+            const invItem = inventoryMap.get(reqItem.productId);
+            const availableStock = invItem ? invItem.stockOnHand - invItem.reservedStock : 0;
+
+            if (!invItem || availableStock < reqItem.quantity) {
+              failedItems.push({
+                productId: reqItem.productId,
+                requestedQuantity: reqItem.quantity,
+                availableStock,
+              });
+            }
+          }
+
+          if (failedItems.length > 0) {
+            throw new BadRequestException(
+              `Insufficient stock for products: ${failedItems.map((f) => f.productId).join(', ')}`,
+            );
+          }
+
+          // Apply reservations
+          for (const reqItem of dto.items) {
+            await tx.inventoryItem.update({
+              where: { productId: reqItem.productId },
+              data: {
+                reservedStock: { increment: reqItem.quantity },
+              },
+            });
+
+            await tx.stockReservation.upsert({
+              where: {
+                orderId_productId: {
+                  orderId: dto.orderId,
+                  productId: reqItem.productId,
+                },
+              },
+              create: {
                 orderId: dto.orderId,
                 productId: reqItem.productId,
+                quantity: reqItem.quantity,
+                status: 'RESERVED',
               },
-            },
-            create: {
-              orderId: dto.orderId,
-              productId: reqItem.productId,
-              quantity: reqItem.quantity,
-              status: 'RESERVED',
-            },
-            update: {
-              quantity: reqItem.quantity,
-              status: 'RESERVED',
-            },
-          });
-        }
-      });
+              update: {
+                quantity: reqItem.quantity,
+                status: 'RESERVED',
+              },
+            });
+          }
+        });
 
-      this.logger.log(`Stock successfully reserved for order ${dto.orderId}`);
-      return { success: true };
+        this.logger.log(`Stock successfully reserved for order ${dto.orderId}`);
+        return { success: true };
+      });
     } catch (error) {
       const reason = (error as Error).message;
       this.logger.error(`Failed to reserve stock for order ${dto.orderId}: ${reason}`);

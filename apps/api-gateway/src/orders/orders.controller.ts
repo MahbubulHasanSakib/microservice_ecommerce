@@ -11,7 +11,6 @@ import {
   Query,
   ServiceUnavailableException,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
@@ -32,7 +31,6 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
-import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
 const RPC_TIMEOUT_MS = 5000;
 
@@ -55,7 +53,6 @@ export class OrdersController {
    * Authenticated: Place a new order with idempotency protection and circuit breaker.
    */
   @Post()
-  @UseInterceptors(IdempotencyInterceptor)
   @HttpCode(HttpStatus.CREATED)
   async createOrder(
     @CurrentUser() user: AuthenticatedUser,
