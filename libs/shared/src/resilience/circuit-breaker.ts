@@ -15,6 +15,7 @@ export interface CircuitBreakerOptions {
   failureThreshold?: number; // Number of consecutive failures before opening circuit (default: 5)
   resetTimeoutMs?: number;   // Time in ms to wait before attempting recovery (default: 10000)
   name?: string;             // Identifier for logging
+  onStateChange?: (state: CircuitBreakerState, name: string) => void;
 }
 
 export class CircuitBreakerError extends Error {
@@ -31,18 +32,27 @@ export class CircuitBreaker {
   private readonly failureThreshold: number;
   private readonly resetTimeoutMs: number;
   private readonly name: string;
+  private readonly onStateChange?: (state: CircuitBreakerState, name: string) => void;
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.failureThreshold = options.failureThreshold ?? 5;
     this.resetTimeoutMs = options.resetTimeoutMs ?? 10000;
     this.name = options.name ?? 'CircuitBreaker';
+    this.onStateChange = options.onStateChange;
+  }
+
+  private transitionTo(newState: CircuitBreakerState): void {
+    if (this.state !== newState) {
+      this.state = newState;
+      this.onStateChange?.(newState, this.name);
+    }
   }
 
   getState(): CircuitBreakerState {
     if (this.state === CircuitBreakerState.OPEN && this.lastFailureTime) {
       const now = Date.now();
       if (now - this.lastFailureTime >= this.resetTimeoutMs) {
-        this.state = CircuitBreakerState.HALF_OPEN;
+        this.transitionTo(CircuitBreakerState.HALF_OPEN);
       }
     }
     return this.state;
@@ -75,7 +85,7 @@ export class CircuitBreaker {
 
   private onSuccess(): void {
     this.failureCount = 0;
-    this.state = CircuitBreakerState.CLOSED;
+    this.transitionTo(CircuitBreakerState.CLOSED);
   }
 
   private onFailure(): void {
@@ -83,7 +93,7 @@ export class CircuitBreaker {
     this.lastFailureTime = Date.now();
 
     if (this.failureCount >= this.failureThreshold || this.state === CircuitBreakerState.HALF_OPEN) {
-      this.state = CircuitBreakerState.OPEN;
+      this.transitionTo(CircuitBreakerState.OPEN);
     }
   }
 

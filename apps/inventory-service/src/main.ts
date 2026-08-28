@@ -1,9 +1,11 @@
+import { initTracing, RABBITMQ_EXCHANGES, RABBITMQ_QUEUES } from '@ecommerce/shared';
+initTracing('inventory-service');
+
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from 'nestjs-pino';
-import { RABBITMQ_EXCHANGES, RABBITMQ_QUEUES } from '@ecommerce/shared';
 import { AppModule } from './app.module';
 import { RpcExceptionFilter } from './common/filters/rpc-exception.filter';
 

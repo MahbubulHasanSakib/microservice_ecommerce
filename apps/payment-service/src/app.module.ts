@@ -6,6 +6,8 @@ import { LoggerModule } from './common/logger/logger.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { PaymentsModule } from './payments/payments.module';
+import { MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -16,8 +18,15 @@ import { PaymentsModule } from './payments/payments.module';
     }),
     LoggerModule,
     PrismaModule,
+    MetricsModule,
     HealthModule,
     PaymentsModule,
+  ],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ObservabilityInterceptor,
+    },
   ],
 })
 export class AppModule {}

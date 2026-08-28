@@ -1,3 +1,6 @@
+import { initTracing } from '@ecommerce/shared';
+initTracing('api-gateway');
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -16,9 +19,9 @@ async function bootstrap(): Promise<void> {
   const port = configService.get<number>('port') ?? 3000;
   const nodeEnv = configService.get<string>('nodeEnv');
 
-  // Set global API version prefix: /api/v1/... (excluding health endpoints)
+  // Set global API version prefix: /api/v1/... (excluding health and metrics endpoints)
   app.setGlobalPrefix('api/v1', {
-    exclude: ['health', 'health/ready'],
+    exclude: ['health', 'health/ready', 'metrics'],
   });
 
   /**

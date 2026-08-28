@@ -1,4 +1,4 @@
-import { Controller, Logger } from '@nestjs/common';
+import { Controller, Logger, Optional } from '@nestjs/common';
 import { Ctx, EventPattern, MessagePattern, Payload, RmqContext } from '@nestjs/microservices';
 import {
   INVENTORY_EVENTS,
@@ -10,6 +10,8 @@ import {
   PAYMENT_EVENTS,
   PaymentFailedEvent,
   PaymentSucceededEvent,
+  runWithTraceContext,
+  MetricsService,
 } from '@ecommerce/shared';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -19,7 +21,10 @@ import { QueryOrdersDto } from './dto/query-orders.dto';
 export class OrdersController {
   private readonly logger = new Logger(OrdersController.name);
 
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    @Optional() private readonly metricsService?: MetricsService,
+  ) {}
 
   @MessagePattern(ORDER_PATTERNS.CREATE)
   async create(@Payload() dto: CreateOrderDto): Promise<OrderResponse> {
@@ -64,17 +69,37 @@ export class OrdersController {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
-    try {
-      this.logger.log(`Received event '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}' for order ${data?.orderId}`);
-      await this.ordersService.handlePaymentSucceeded(data);
-      channel.ack(originalMsg);
-    } catch (error) {
-      this.logger.error(
-        `Failed to process event '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}': ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      channel.nack(originalMsg, false, false);
-    }
+    await runWithTraceContext(
+      data,
+      'consumer.payment.succeeded -> confirmOrder',
+      async () => {
+        try {
+          this.logger.log(
+            `Received event '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}' for order ${data?.orderId}`,
+          );
+          await this.ordersService.handlePaymentSucceeded(data);
+
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_SUCCEEDED,
+            action: 'consumed',
+            status: 'success',
+          });
+
+          channel.ack(originalMsg);
+        } catch (error) {
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_SUCCEEDED,
+            action: 'consumed',
+            status: 'failure',
+          });
+          this.logger.error(
+            `Failed to process event '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}': ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+          channel.nack(originalMsg, false, false);
+        }
+      },
+    );
   }
 
   /**
@@ -89,17 +114,37 @@ export class OrdersController {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
-    try {
-      this.logger.log(`Received event '${PAYMENT_EVENTS.PAYMENT_FAILED}' for order ${data?.orderId}`);
-      await this.ordersService.handlePaymentFailed(data);
-      channel.ack(originalMsg);
-    } catch (error) {
-      this.logger.error(
-        `Failed to process event '${PAYMENT_EVENTS.PAYMENT_FAILED}': ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      channel.nack(originalMsg, false, false);
-    }
+    await runWithTraceContext(
+      data,
+      'consumer.payment.failed -> cancelOrderAndCompensate',
+      async () => {
+        try {
+          this.logger.log(
+            `Received event '${PAYMENT_EVENTS.PAYMENT_FAILED}' for order ${data?.orderId}`,
+          );
+          await this.ordersService.handlePaymentFailed(data);
+
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_FAILED,
+            action: 'consumed',
+            status: 'success',
+          });
+
+          channel.ack(originalMsg);
+        } catch (error) {
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_FAILED,
+            action: 'consumed',
+            status: 'failure',
+          });
+          this.logger.error(
+            `Failed to process event '${PAYMENT_EVENTS.PAYMENT_FAILED}': ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+          channel.nack(originalMsg, false, false);
+        }
+      },
+    );
   }
 
   /**
@@ -114,16 +159,36 @@ export class OrdersController {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
-    try {
-      this.logger.log(`Received event '${INVENTORY_EVENTS.INVENTORY_FAILED}' for order ${data?.orderId}`);
-      await this.ordersService.handleInventoryReservationFailed(data);
-      channel.ack(originalMsg);
-    } catch (error) {
-      this.logger.error(
-        `Failed to process event '${INVENTORY_EVENTS.INVENTORY_FAILED}': ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      channel.nack(originalMsg, false, false);
-    }
+    await runWithTraceContext(
+      data,
+      'consumer.inventory.failed -> cancelOrderOutOfStock',
+      async () => {
+        try {
+          this.logger.log(
+            `Received event '${INVENTORY_EVENTS.INVENTORY_FAILED}' for order ${data?.orderId}`,
+          );
+          await this.ordersService.handleInventoryReservationFailed(data);
+
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: INVENTORY_EVENTS.INVENTORY_FAILED,
+            action: 'consumed',
+            status: 'success',
+          });
+
+          channel.ack(originalMsg);
+        } catch (error) {
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: INVENTORY_EVENTS.INVENTORY_FAILED,
+            action: 'consumed',
+            status: 'failure',
+          });
+          this.logger.error(
+            `Failed to process event '${INVENTORY_EVENTS.INVENTORY_FAILED}': ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+          channel.nack(originalMsg, false, false);
+        }
+      },
+    );
   }
 }

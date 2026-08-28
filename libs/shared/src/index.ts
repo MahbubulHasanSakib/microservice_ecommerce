@@ -29,3 +29,11 @@ export * from './resilience/retry-backoff';
 export * from './types/redis.types';
 export * from './redis/redis.service';
 export * from './redis/redis.module';
+
+// Observability & Metrics
+export * from './observability/tracing';
+export * from './observability/trace-context';
+export * from './observability/metrics.service';
+export * from './observability/metrics.controller';
+export * from './observability/metrics.module';
+export * from './observability/observability.interceptor';

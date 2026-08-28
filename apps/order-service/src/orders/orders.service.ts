@@ -21,6 +21,7 @@ import {
   PRODUCT_PATTERNS,
   ProductResponse,
   SERVICES,
+  injectTraceContext,
 } from '@ecommerce/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -261,12 +262,13 @@ export class OrdersService {
 
     // 5. Fast-path asynchronous publishing to RabbitMQ (OutboxProcessor acts as reliable fallback)
     try {
-      this.notificationClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
+      const tracedPayload = injectTraceContext(eventPayload!);
+      this.notificationClient.emit(ORDER_EVENTS.ORDER_CREATED, tracedPayload);
       if (this.inventoryClient) {
-        this.inventoryClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
+        this.inventoryClient.emit(ORDER_EVENTS.ORDER_CREATED, tracedPayload);
       }
       if (this.paymentClient) {
-        this.paymentClient.emit(ORDER_EVENTS.ORDER_CREATED, eventPayload!);
+        this.paymentClient.emit(ORDER_EVENTS.ORDER_CREATED, tracedPayload);
       }
 
       // Mark outbox event as PUBLISHED on successful fast-path emission

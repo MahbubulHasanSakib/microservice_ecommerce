@@ -7,6 +7,9 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { HealthModule } from './health/health.module';
 
+import { MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -20,8 +23,15 @@ import { HealthModule } from './health/health.module';
     }),
     LoggerModule,
     PrismaModule, // global — makes PrismaService available everywhere
+    MetricsModule,
     UsersModule,
     HealthModule,
+  ],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ObservabilityInterceptor,
+    },
   ],
 })
 export class AppModule {}

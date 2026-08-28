@@ -1,4 +1,4 @@
-import { Controller, Logger } from '@nestjs/common';
+import { Controller, Logger, Optional } from '@nestjs/common';
 import { Ctx, EventPattern, MessagePattern, Payload, RmqContext } from '@nestjs/microservices';
 import {
   CheckStockDto,
@@ -12,6 +12,8 @@ import {
   ReserveStockDto,
   RestockDto,
   StockAvailabilityResponse,
+  runWithTraceContext,
+  MetricsService,
 } from '@ecommerce/shared';
 import { InventoryService } from './inventory.service';
 
@@ -19,7 +21,10 @@ import { InventoryService } from './inventory.service';
 export class InventoryController {
   private readonly logger = new Logger(InventoryController.name);
 
-  constructor(private readonly inventoryService: InventoryService) {}
+  constructor(
+    private readonly inventoryService: InventoryService,
+    @Optional() private readonly metricsService?: MetricsService,
+  ) {}
 
   /**
    * Event Consumer: Reacts to OrderCreatedEvent to reserve stock.
@@ -32,23 +37,42 @@ export class InventoryController {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
-    try {
-      this.logger.log(
-        `Received event '${ORDER_EVENTS.ORDER_CREATED}' for order #${data?.orderNumber || data?.orderId}`,
-      );
+    await runWithTraceContext(
+      data,
+      'consumer.order.created -> reserveStock',
+      async () => {
+        try {
+          this.logger.log(
+            `Received event '${ORDER_EVENTS.ORDER_CREATED}' for order #${data?.orderNumber || data?.orderId}`,
+          );
 
-      await this.inventoryService.handleOrderCreated(data);
+          await this.inventoryService.handleOrderCreated(data);
 
-      channel.ack(originalMsg);
-      this.logger.debug(`Acknowledged order.created event in inventory service for #${data?.orderNumber}`);
-    } catch (error) {
-      this.logger.error(
-        `Error handling order.created in inventory service: ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      // NACK without requeue to move to DLQ
-      channel.nack(originalMsg, false, false);
-    }
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: ORDER_EVENTS.ORDER_CREATED,
+            action: 'consumed',
+            status: 'success',
+          });
+
+          channel.ack(originalMsg);
+          this.logger.debug(
+            `Acknowledged order.created event in inventory service for #${data?.orderNumber}`,
+          );
+        } catch (error) {
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: ORDER_EVENTS.ORDER_CREATED,
+            action: 'consumed',
+            status: 'failure',
+          });
+          this.logger.error(
+            `Error handling order.created in inventory service: ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+          // NACK without requeue to move to DLQ
+          channel.nack(originalMsg, false, false);
+        }
+      },
+    );
   }
 
   /**
@@ -62,22 +86,41 @@ export class InventoryController {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
-    try {
-      this.logger.log(
-        `Received event '${PAYMENT_EVENTS.PAYMENT_FAILED}' for order #${data?.orderNumber || data?.orderId}`,
-      );
+    await runWithTraceContext(
+      data,
+      'consumer.payment.failed -> compensateStock',
+      async () => {
+        try {
+          this.logger.log(
+            `Received event '${PAYMENT_EVENTS.PAYMENT_FAILED}' for order #${data?.orderNumber || data?.orderId}`,
+          );
 
-      await this.inventoryService.handlePaymentFailed(data);
+          await this.inventoryService.handlePaymentFailed(data);
 
-      channel.ack(originalMsg);
-      this.logger.debug(`Acknowledged payment.failed event in inventory service for #${data?.orderNumber}`);
-    } catch (error) {
-      this.logger.error(
-        `Error handling payment.failed in inventory service: ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      channel.nack(originalMsg, false, false);
-    }
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_FAILED,
+            action: 'consumed',
+            status: 'success',
+          });
+
+          channel.ack(originalMsg);
+          this.logger.debug(
+            `Acknowledged payment.failed event in inventory service for #${data?.orderNumber}`,
+          );
+        } catch (error) {
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_FAILED,
+            action: 'consumed',
+            status: 'failure',
+          });
+          this.logger.error(
+            `Error handling payment.failed in inventory service: ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+          channel.nack(originalMsg, false, false);
+        }
+      },
+    );
   }
 
   /**

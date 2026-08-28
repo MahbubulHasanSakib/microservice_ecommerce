@@ -15,6 +15,7 @@ import {
   PaymentSucceededEvent,
   ProcessPaymentDto,
   SERVICES,
+  injectTraceContext,
 } from '@ecommerce/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../../prisma/client';
@@ -115,9 +116,10 @@ export class PaymentsService {
       };
 
       try {
-        this.orderRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, failedEvent);
-        this.inventoryRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, failedEvent);
-        this.notificationRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, failedEvent);
+        const tracedFailedEvent = injectTraceContext(failedEvent);
+        this.orderRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, tracedFailedEvent);
+        this.inventoryRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, tracedFailedEvent);
+        this.notificationRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, tracedFailedEvent);
         this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_FAILED}' for order ${dto.orderId}`);
       } catch (err) {
         this.logger.error(`Failed to emit payment.failed event: ${(err as Error).message}`);
@@ -154,8 +156,9 @@ export class PaymentsService {
     };
 
     try {
-      this.orderRmqClient.emit(PAYMENT_EVENTS.PAYMENT_SUCCEEDED, succeededEvent);
-      this.notificationRmqClient.emit(PAYMENT_EVENTS.PAYMENT_SUCCEEDED, succeededEvent);
+      const tracedSucceededEvent = injectTraceContext(succeededEvent);
+      this.orderRmqClient.emit(PAYMENT_EVENTS.PAYMENT_SUCCEEDED, tracedSucceededEvent);
+      this.notificationRmqClient.emit(PAYMENT_EVENTS.PAYMENT_SUCCEEDED, tracedSucceededEvent);
       this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}' for order ${dto.orderId}`);
     } catch (err) {
       this.logger.error(`Failed to emit payment.succeeded event: ${(err as Error).message}`);
@@ -170,7 +173,7 @@ export class PaymentsService {
     });
 
     if (!payment) {
-      throw new NotFoundException(`Payment record for order ID '${orderId}' not found`);
+      throw new NotFoundException(`Payment for order '${orderId}' not found`);
     }
 
     return this.mapToResponse(payment);
@@ -182,7 +185,7 @@ export class PaymentsService {
     });
 
     if (!payment) {
-      throw new NotFoundException(`Payment record with ID '${id}' not found`);
+      throw new NotFoundException(`Payment with ID '${id}' not found`);
     }
 
     return this.mapToResponse(payment);
@@ -194,23 +197,25 @@ export class PaymentsService {
     });
 
     if (!payment) {
-      throw new NotFoundException(`Payment record for order ID '${orderId}' not found`);
+      throw new NotFoundException(`Payment for order '${orderId}' not found`);
     }
+
+    this.logger.log(`Processing refund for order '${orderId}'. Reason: ${reason ?? 'N/A'}`);
 
     if (payment.status !== 'COMPLETED') {
-      throw new BadRequestException(`Cannot refund payment in '${payment.status}' status`);
+      throw new BadRequestException(
+        `Cannot refund payment in status '${payment.status}'. Only COMPLETED payments can be refunded.`,
+      );
     }
 
-    const refundTransactionId = `REF-${this.generateTransactionId()}`;
     const refunded = await this.prisma.payment.update({
-      where: { orderId },
+      where: { id: payment.id },
       data: {
         status: 'REFUNDED',
-        refundTransactionId,
-        failureReason: reason,
       },
     });
 
+    const refundTransactionId = `REF-${Date.now()}`;
     const refundEvent: PaymentRefundedEvent = {
       paymentId: refunded.id,
       orderId: refunded.orderId,
@@ -219,11 +224,14 @@ export class PaymentsService {
       currency: refunded.currency,
       refundTransactionId,
       status: PaymentStatus.REFUNDED,
-      timestamp: refunded.updatedAt,
+      timestamp: new Date().toISOString(),
     };
 
     try {
-      this.notificationRmqClient.emit(PAYMENT_EVENTS.PAYMENT_REFUNDED, refundEvent);
+      this.notificationRmqClient.emit(
+        PAYMENT_EVENTS.PAYMENT_REFUNDED,
+        injectTraceContext(refundEvent),
+      );
       this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_REFUNDED}' for order ${orderId}`);
     } catch (err) {
       this.logger.error(`Failed to emit payment.refunded event: ${(err as Error).message}`);

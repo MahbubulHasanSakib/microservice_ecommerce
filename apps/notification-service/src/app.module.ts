@@ -5,6 +5,8 @@ import { validationSchema } from './config/validation.schema';
 import { LoggerModule } from './common/logger/logger.module';
 import { HealthModule } from './health/health.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -14,8 +16,15 @@ import { NotificationsModule } from './notifications/notifications.module';
       validationSchema,
     }),
     LoggerModule,
+    MetricsModule,
     HealthModule,
     NotificationsModule,
+  ],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ObservabilityInterceptor,
+    },
   ],
 })
 export class AppModule {}

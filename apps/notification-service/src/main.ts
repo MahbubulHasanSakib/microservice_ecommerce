@@ -1,8 +1,10 @@
+import { initTracing, RABBITMQ_EXCHANGES, RABBITMQ_QUEUES } from '@ecommerce/shared';
+initTracing('notification-service');
+
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from 'nestjs-pino';
-import { RABBITMQ_EXCHANGES, RABBITMQ_QUEUES } from '@ecommerce/shared';
 import { AppModule } from './app.module';
 
 async function bootstrap() {

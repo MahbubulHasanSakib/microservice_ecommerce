@@ -21,6 +21,7 @@ import {
   SERVICES,
   StockAvailabilityResponse,
   RedisService,
+  injectTraceContext,
 } from '@ecommerce/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../../prisma/client';
@@ -267,7 +268,10 @@ export class InventoryService {
       releasedAt: new Date().toISOString(),
     };
 
-    this.orderRmqClient.emit(INVENTORY_EVENTS.INVENTORY_RELEASED, releasedEvent);
+    this.orderRmqClient.emit(
+      INVENTORY_EVENTS.INVENTORY_RELEASED,
+      injectTraceContext(releasedEvent),
+    );
 
     this.logger.log(
       `Released ${reservations.length} reservations for order ${dto.orderId}`,
@@ -307,8 +311,9 @@ export class InventoryService {
         reservedAt: new Date().toISOString(),
       };
 
-      this.paymentRmqClient.emit(INVENTORY_EVENTS.INVENTORY_RESERVED, reservedEvent);
-      this.orderRmqClient.emit(INVENTORY_EVENTS.INVENTORY_RESERVED, reservedEvent);
+      const tracedEvent = injectTraceContext(reservedEvent);
+      this.paymentRmqClient.emit(INVENTORY_EVENTS.INVENTORY_RESERVED, tracedEvent);
+      this.orderRmqClient.emit(INVENTORY_EVENTS.INVENTORY_RESERVED, tracedEvent);
       this.logger.log(`Emitted inventory.reserved event for order #${event.orderNumber}`);
     } else {
       // Stock unavailable — emit inventory.failed event to cancel order and notify customer
@@ -326,8 +331,9 @@ export class InventoryService {
         timestamp: new Date().toISOString(),
       };
 
-      this.orderRmqClient.emit(INVENTORY_EVENTS.INVENTORY_FAILED, failedEvent);
-      this.notificationRmqClient.emit(INVENTORY_EVENTS.INVENTORY_FAILED, failedEvent);
+      const tracedFailedEvent = injectTraceContext(failedEvent);
+      this.orderRmqClient.emit(INVENTORY_EVENTS.INVENTORY_FAILED, tracedFailedEvent);
+      this.notificationRmqClient.emit(INVENTORY_EVENTS.INVENTORY_FAILED, tracedFailedEvent);
       this.logger.warn(`Emitted inventory.failed event for order #${event.orderNumber}`);
     }
   }

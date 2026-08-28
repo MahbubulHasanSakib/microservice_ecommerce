@@ -14,6 +14,7 @@ import { AuthModule } from './auth/auth.module';
 import { ProductsModule } from './products/products.module';
 import { OrdersModule } from './orders/orders.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { InventoryModule } from './inventory/inventory.module';
     }),
     LoggerModule,
     RedisModule,
+    MetricsModule,
     HealthModule,
     UsersModule,
     AuthModule,
@@ -39,6 +41,10 @@ import { InventoryModule } from './inventory/inventory.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: IdempotencyInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ObservabilityInterceptor,
     },
   ],
 })

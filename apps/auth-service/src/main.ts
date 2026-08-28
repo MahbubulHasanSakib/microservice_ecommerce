@@ -1,3 +1,6 @@
+import { initTracing } from '@ecommerce/shared';
+initTracing('auth-service');
+
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { ValidationPipe } from '@nestjs/common';

@@ -8,6 +8,9 @@ import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 
+import { MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -18,8 +21,15 @@ import { AuthModule } from './auth/auth.module';
     LoggerModule,
     PrismaModule,
     RedisModule,
+    MetricsModule,
     HealthModule,
     AuthModule,
+  ],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ObservabilityInterceptor,
+    },
   ],
 })
 export class AppModule {}

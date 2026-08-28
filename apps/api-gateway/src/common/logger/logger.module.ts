@@ -3,6 +3,7 @@ import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { IncomingMessage, ServerResponse } from 'http';
 import { CORRELATION_ID_HEADER } from '../middleware/correlation-id.middleware';
+import { getActiveTraceIdentifiers } from '@ecommerce/shared';
 
 /**
  * LoggerModule
@@ -53,10 +54,14 @@ import { CORRELATION_ID_HEADER } from '../middleware/correlation-id.middleware';
                     translateTime: 'SYS:standard',
                   },
                 },
-            // Attach the correlation ID to every log line automatically
-            customProps: (req: IncomingMessage) => ({
-              correlationId: req.headers[CORRELATION_ID_HEADER],
-            }),
+            // Attach correlation ID and active OpenTelemetry trace identifiers to every log line
+            customProps: (req: IncomingMessage) => {
+              const { traceId, spanId } = getActiveTraceIdentifiers();
+              return {
+                correlationId: req.headers[CORRELATION_ID_HEADER],
+                ...(traceId ? { traceId, spanId } : {}),
+              };
+            },
             // Redact sensitive fields — these are NEVER written to logs
             redact: {
               paths: [

@@ -7,7 +7,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ProductsModule } from './products/products.module';
-import { RedisModule } from '@ecommerce/shared';
+import { RedisModule, MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -19,9 +20,16 @@ import { RedisModule } from '@ecommerce/shared';
     LoggerModule,
     PrismaModule,
     RedisModule,
+    MetricsModule,
     HealthModule,
     CategoriesModule,
     ProductsModule,
+  ],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ObservabilityInterceptor,
+    },
   ],
 })
 export class AppModule {}

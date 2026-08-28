@@ -1,4 +1,4 @@
-import { Controller, Logger } from '@nestjs/common';
+import { Controller, Logger, Optional } from '@nestjs/common';
 import { Ctx, EventPattern, Payload, RmqContext } from '@nestjs/microservices';
 import {
   INVENTORY_EVENTS,
@@ -8,6 +8,8 @@ import {
   PAYMENT_EVENTS,
   PaymentFailedEvent,
   PaymentSucceededEvent,
+  runWithTraceContext,
+  MetricsService,
 } from '@ecommerce/shared';
 import { NotificationsService } from './notifications.service';
 
@@ -15,7 +17,10 @@ import { NotificationsService } from './notifications.service';
 export class NotificationsController {
   private readonly logger = new Logger(NotificationsController.name);
 
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    @Optional() private readonly metricsService?: MetricsService,
+  ) {}
 
   @EventPattern(ORDER_EVENTS.ORDER_CREATED)
   async handleOrderCreated(
@@ -25,25 +30,42 @@ export class NotificationsController {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
-    try {
-      this.logger.log(
-        `Received event '${ORDER_EVENTS.ORDER_CREATED}' for order ID: ${data?.orderId || 'unknown'}`,
-      );
+    await runWithTraceContext(
+      data,
+      'consumer.order.created -> sendConfirmationEmail',
+      async () => {
+        try {
+          this.logger.log(
+            `Received event '${ORDER_EVENTS.ORDER_CREATED}' for order ID: ${data?.orderId || 'unknown'}`,
+          );
 
-      await this.notificationsService.processOrderCreated(data);
+          await this.notificationsService.processOrderCreated(data);
 
-      // Explicit manual acknowledgment (ACK)
-      channel.ack(originalMsg);
-      this.logger.debug(`Acknowledged message for order ${data?.orderNumber}`);
-    } catch (error) {
-      this.logger.error(
-        `Failed to process event '${ORDER_EVENTS.ORDER_CREATED}': ${(error as Error).message}`,
-        (error as Error).stack,
-      );
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: ORDER_EVENTS.ORDER_CREATED,
+            action: 'consumed',
+            status: 'success',
+          });
 
-      // Negative acknowledgment (NACK) - without requeue to route to DLQ if configured
-      channel.nack(originalMsg, false, false);
-    }
+          // Explicit manual acknowledgment (ACK)
+          channel.ack(originalMsg);
+          this.logger.debug(`Acknowledged message for order ${data?.orderNumber}`);
+        } catch (error) {
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: ORDER_EVENTS.ORDER_CREATED,
+            action: 'consumed',
+            status: 'failure',
+          });
+          this.logger.error(
+            `Failed to process event '${ORDER_EVENTS.ORDER_CREATED}': ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+
+          // Negative acknowledgment (NACK) - without requeue to route to DLQ if configured
+          channel.nack(originalMsg, false, false);
+        }
+      },
+    );
   }
 
   @EventPattern(PAYMENT_EVENTS.PAYMENT_SUCCEEDED)
@@ -54,22 +76,39 @@ export class NotificationsController {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
-    try {
-      this.logger.log(
-        `Received event '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}' for order ID: ${data?.orderId || 'unknown'}`,
-      );
+    await runWithTraceContext(
+      data,
+      'consumer.payment.succeeded -> sendReceiptEmail',
+      async () => {
+        try {
+          this.logger.log(
+            `Received event '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}' for order ID: ${data?.orderId || 'unknown'}`,
+          );
 
-      await this.notificationsService.processPaymentSucceeded(data);
+          await this.notificationsService.processPaymentSucceeded(data);
 
-      channel.ack(originalMsg);
-      this.logger.debug(`Acknowledged payment.succeeded message for order ${data?.orderNumber}`);
-    } catch (error) {
-      this.logger.error(
-        `Failed to process event '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}': ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      channel.nack(originalMsg, false, false);
-    }
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_SUCCEEDED,
+            action: 'consumed',
+            status: 'success',
+          });
+
+          channel.ack(originalMsg);
+          this.logger.debug(`Acknowledged payment.succeeded message for order ${data?.orderNumber}`);
+        } catch (error) {
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_SUCCEEDED,
+            action: 'consumed',
+            status: 'failure',
+          });
+          this.logger.error(
+            `Failed to process event '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}': ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+          channel.nack(originalMsg, false, false);
+        }
+      },
+    );
   }
 
   @EventPattern(PAYMENT_EVENTS.PAYMENT_FAILED)
@@ -80,22 +119,39 @@ export class NotificationsController {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
-    try {
-      this.logger.log(
-        `Received event '${PAYMENT_EVENTS.PAYMENT_FAILED}' for order ID: ${data?.orderId || 'unknown'}`,
-      );
+    await runWithTraceContext(
+      data,
+      'consumer.payment.failed -> sendPaymentFailedEmail',
+      async () => {
+        try {
+          this.logger.log(
+            `Received event '${PAYMENT_EVENTS.PAYMENT_FAILED}' for order ID: ${data?.orderId || 'unknown'}`,
+          );
 
-      await this.notificationsService.processPaymentFailed(data);
+          await this.notificationsService.processPaymentFailed(data);
 
-      channel.ack(originalMsg);
-      this.logger.debug(`Acknowledged payment.failed message for order ${data?.orderNumber}`);
-    } catch (error) {
-      this.logger.error(
-        `Failed to process event '${PAYMENT_EVENTS.PAYMENT_FAILED}': ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      channel.nack(originalMsg, false, false);
-    }
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_FAILED,
+            action: 'consumed',
+            status: 'success',
+          });
+
+          channel.ack(originalMsg);
+          this.logger.debug(`Acknowledged payment.failed message for order ${data?.orderNumber}`);
+        } catch (error) {
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: PAYMENT_EVENTS.PAYMENT_FAILED,
+            action: 'consumed',
+            status: 'failure',
+          });
+          this.logger.error(
+            `Failed to process event '${PAYMENT_EVENTS.PAYMENT_FAILED}': ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+          channel.nack(originalMsg, false, false);
+        }
+      },
+    );
   }
 
   @EventPattern(INVENTORY_EVENTS.INVENTORY_FAILED)
@@ -106,21 +162,38 @@ export class NotificationsController {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
-    try {
-      this.logger.log(
-        `Received event '${INVENTORY_EVENTS.INVENTORY_FAILED}' for order ID: ${data?.orderId || 'unknown'}`,
-      );
+    await runWithTraceContext(
+      data,
+      'consumer.inventory.failed -> sendOutOfStockEmail',
+      async () => {
+        try {
+          this.logger.log(
+            `Received event '${INVENTORY_EVENTS.INVENTORY_FAILED}' for order ID: ${data?.orderId || 'unknown'}`,
+          );
 
-      await this.notificationsService.processInventoryFailed(data);
+          await this.notificationsService.processInventoryFailed(data);
 
-      channel.ack(originalMsg);
-      this.logger.debug(`Acknowledged inventory.failed message for order ${data?.orderNumber}`);
-    } catch (error) {
-      this.logger.error(
-        `Failed to process event '${INVENTORY_EVENTS.INVENTORY_FAILED}': ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      channel.nack(originalMsg, false, false);
-    }
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: INVENTORY_EVENTS.INVENTORY_FAILED,
+            action: 'consumed',
+            status: 'success',
+          });
+
+          channel.ack(originalMsg);
+          this.logger.debug(`Acknowledged inventory.failed message for order ${data?.orderNumber}`);
+        } catch (error) {
+          this.metricsService?.rabbitmqEventsTotal.inc({
+            event_name: INVENTORY_EVENTS.INVENTORY_FAILED,
+            action: 'consumed',
+            status: 'failure',
+          });
+          this.logger.error(
+            `Failed to process event '${INVENTORY_EVENTS.INVENTORY_FAILED}': ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+          channel.nack(originalMsg, false, false);
+        }
+      },
+    );
   }
 }
