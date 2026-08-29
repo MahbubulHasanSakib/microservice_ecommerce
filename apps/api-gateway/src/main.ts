@@ -5,12 +5,22 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from 'nestjs-pino';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
 async function bootstrap(): Promise<void> {
   // bufferLogs: true — buffer logs until Pino logger is ready, so we don't miss startup logs
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+  // Secure HTTP Headers with Helmet
+  app.use(helmet());
+
+  // Enable CORS
+  app.enableCors({
+    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*',
+    credentials: true,
+  });
 
   // Replace NestJS's default logger with our Pino instance
   app.useLogger(app.get(Logger));
