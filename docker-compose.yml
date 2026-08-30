@@ -1,4 +1,7 @@
 services:
+  # =============================================================================
+  # 1. CORE INFRASTRUCTURE LAYER (Always Running)
+  # =============================================================================
   postgres:
     image: postgres:16-alpine
     container_name: ecommerce_postgres
@@ -18,6 +21,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
 
   redis:
     image: redis:7-alpine
@@ -33,6 +41,47 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: ecommerce_kafka
+    restart: unless-stopped
+    ports:
+      - '9092:9092'
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:9093'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ['CMD-SHELL', '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -52,38 +101,15 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
 
-  kafka:
-    image: apache/kafka:3.7.0
-    container_name: ecommerce_kafka
-    restart: unless-stopped
-    ports:
-      - '9092:9092'
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:9093'
-      KAFKA_LISTENERS: 'PLAINTEXT://:9092,CONTROLLER://:9093'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_NUM_PARTITIONS: 3
-      KAFKA_LOG_RETENTION_HOURS: 168
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
-    volumes:
-      - kafka_data:/var/lib/kafka/data
-    healthcheck:
-      test: ['CMD-SHELL', '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
+  # =============================================================================
+  # 2. OBSERVABILITY LAYER
+  # =============================================================================
   jaeger:
     image: jaegertracing/all-in-one:1.55
     container_name: ecommerce_jaeger
@@ -94,6 +120,11 @@ services:
       - '4318:4318'   # OTLP HTTP receiver
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
 
   prometheus:
     image: prom/prometheus:v2.50.0
@@ -105,6 +136,11 @@ services:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
 
   grafana:
     image: grafana/grafana:10.3.3
@@ -123,7 +159,272 @@ services:
     depends_on:
       - prometheus
       - jaeger
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
 
+  # =============================================================================
+  # 3. APPLICATION MICROSERVICES LAYER (Profile: apps)
+  # Run with: docker compose --profile apps up --build
+  # =============================================================================
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    container_name: ecommerce_api_gateway
+    restart: unless-stopped
+    profiles: ['apps']
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:-super-secret-production-grade-jwt-key-min-32-chars-long}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      AUTH_SERVICE_HOST: auth-service
+      AUTH_SERVICE_PORT: 3002
+      USER_SERVICE_HOST: user-service
+      USER_SERVICE_PORT: 3001
+      PRODUCT_SERVICE_HOST: product-service
+      PRODUCT_SERVICE_PORT: 3003
+      ORDER_SERVICE_HOST: order-service
+      ORDER_SERVICE_PORT: 3004
+      INVENTORY_SERVICE_HOST: inventory-service
+      INVENTORY_SERVICE_PORT: 3006
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      inventory-service:
+        condition: service_started
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  user-service:
+    build:
+      context: .
+      dockerfile: apps/user-service/Dockerfile
+    container_name: ecommerce_user_service
+    restart: unless-stopped
+    profiles: ['apps']
+    ports:
+      - '3001:3001' # TCP RPC
+      - '3011:3011' # HTTP Health/Metrics
+    environment:
+      NODE_ENV: production
+      TCP_PORT: 3001
+      HTTP_PORT: 3011
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/user_db?schema=public
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: apps/auth-service/Dockerfile
+    container_name: ecommerce_auth_service
+    restart: unless-stopped
+    profiles: ['apps']
+    ports:
+      - '3002:3002' # TCP RPC
+      - '3012:3012' # HTTP Health/Metrics
+    environment:
+      NODE_ENV: production
+      TCP_PORT: 3002
+      HTTP_PORT: 3012
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/auth_db?schema=public
+      JWT_SECRET: ${JWT_SECRET:-super-secret-production-grade-jwt-key-min-32-chars-long}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      USER_SERVICE_HOST: user-service
+      USER_SERVICE_PORT: 3001
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  product-service:
+    build:
+      context: .
+      dockerfile: apps/product-service/Dockerfile
+    container_name: ecommerce_product_service
+    restart: unless-stopped
+    profiles: ['apps']
+    ports:
+      - '3003:3003' # TCP RPC
+      - '3013:3013' # HTTP Health/Metrics
+    environment:
+      NODE_ENV: production
+      TCP_PORT: 3003
+      HTTP_PORT: 3013
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/product_db?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  order-service:
+    build:
+      context: .
+      dockerfile: apps/order-service/Dockerfile
+    container_name: ecommerce_order_service
+    restart: unless-stopped
+    profiles: ['apps']
+    ports:
+      - '3004:3004' # TCP RPC
+      - '3014:3014' # HTTP Health/Metrics
+    environment:
+      NODE_ENV: production
+      TCP_PORT: 3004
+      HTTP_PORT: 3014
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/order_db?schema=public
+      KAFKA_BROKERS: kafka:29092
+      PRODUCT_SERVICE_HOST: product-service
+      PRODUCT_SERVICE_PORT: 3003
+      INVENTORY_SERVICE_HOST: inventory-service
+      INVENTORY_SERVICE_PORT: 3006
+      PAYMENT_SERVICE_HOST: payment-service
+      PAYMENT_SERVICE_PORT: 3005
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: apps/payment-service/Dockerfile
+    container_name: ecommerce_payment_service
+    restart: unless-stopped
+    profiles: ['apps']
+    ports:
+      - '3005:3005' # TCP RPC
+      - '3015:3015' # HTTP Health/Metrics
+    environment:
+      NODE_ENV: production
+      TCP_PORT: 3005
+      HTTP_PORT: 3015
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/payment_db?schema=public
+      KAFKA_BROKERS: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: apps/inventory-service/Dockerfile
+    container_name: ecommerce_inventory_service
+    restart: unless-stopped
+    profiles: ['apps']
+    ports:
+      - '3006:3006' # TCP RPC
+      - '3016:3016' # HTTP Health/Metrics
+    environment:
+      NODE_ENV: production
+      TCP_PORT: 3006
+      HTTP_PORT: 3016
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/inventory_db?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: apps/notification-service/Dockerfile
+    container_name: ecommerce_notification_service
+    restart: unless-stopped
+    profiles: ['apps']
+    ports:
+      - '3007:3007' # HTTP Health/Metrics
+    environment:
+      NODE_ENV: production
+      PORT: 3007
+      KAFKA_BROKERS: kafka:29092
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on:
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
 volumes:
   postgres_data:
     driver: local
@@ -133,5 +434,3 @@ volumes:
     driver: local
   kafka_data:
     driver: local
-
-

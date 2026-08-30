@@ -6,6 +6,7 @@ import {
   KAFKA_TOPICS,
   KafkaConsumerService,
   KafkaEventEnvelope,
+  KafkaMessageHandler,
   KafkaMessageMetadata,
   PAYMENT_EVENTS,
   PaymentFailedEvent,
@@ -19,18 +20,19 @@ describe('OrdersKafkaConsumer', () => {
   let consumer: OrdersKafkaConsumer;
   let mockKafkaConsumerService: jest.Mocked<KafkaConsumerService>;
   let mockOrdersService: jest.Mocked<OrdersService>;
-  const registeredHandlers = new Map<string, any>();
+  const registeredHandlers = new Map<string, KafkaMessageHandler>();
 
   beforeEach(async () => {
     registeredHandlers.clear();
 
     mockKafkaConsumerService = {
       initConsumer: jest.fn().mockResolvedValue(undefined),
-      registerHandler: jest.fn().mockImplementation((pattern: string, handler: any) => {
+      registerHandler: jest.fn().mockImplementation((pattern: string, handler: KafkaMessageHandler) => {
         registeredHandlers.set(pattern, handler);
       }),
       onModuleDestroy: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<KafkaConsumerService>;
+
 
     mockOrdersService = {
       handlePaymentSucceeded: jest.fn().mockResolvedValue({ id: 'ord-123', status: 'CONFIRMED' }),
@@ -102,7 +104,7 @@ describe('OrdersKafkaConsumer', () => {
       timestamp: new Date().toISOString(),
     };
 
-    await paymentSucceededHandler(mockEnvelope, mockMetadata);
+    await paymentSucceededHandler!(mockEnvelope, mockMetadata);
 
     expect(mockOrdersService.handlePaymentSucceeded).toHaveBeenCalledWith(mockEnvelope.data);
   });
@@ -139,7 +141,7 @@ describe('OrdersKafkaConsumer', () => {
       timestamp: new Date().toISOString(),
     };
 
-    await paymentFailedHandler(mockEnvelope, mockMetadata);
+    await paymentFailedHandler!(mockEnvelope, mockMetadata);
 
     expect(mockOrdersService.handlePaymentFailed).toHaveBeenCalledWith(mockEnvelope.data);
   });
@@ -173,9 +175,10 @@ describe('OrdersKafkaConsumer', () => {
       timestamp: new Date().toISOString(),
     };
 
-    await inventoryFailedHandler(mockEnvelope, mockMetadata);
+    await inventoryFailedHandler!(mockEnvelope, mockMetadata);
 
     expect(mockOrdersService.handleInventoryReservationFailed).toHaveBeenCalledWith(mockEnvelope.data);
   });
 });
+
 

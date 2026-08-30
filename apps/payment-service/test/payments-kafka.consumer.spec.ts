@@ -6,6 +6,7 @@ import {
   KAFKA_TOPICS,
   KafkaConsumerService,
   KafkaEventEnvelope,
+  KafkaMessageHandler,
   KafkaMessageMetadata,
 } from '@ecommerce/shared';
 import { PaymentsKafkaConsumer } from '../src/payments/payments-kafka.consumer';
@@ -15,18 +16,19 @@ describe('PaymentsKafkaConsumer', () => {
   let consumer: PaymentsKafkaConsumer;
   let mockKafkaConsumerService: jest.Mocked<KafkaConsumerService>;
   let mockPaymentsService: jest.Mocked<PaymentsService>;
-  const registeredHandlers = new Map<string, any>();
+  const registeredHandlers = new Map<string, KafkaMessageHandler>();
 
   beforeEach(async () => {
     registeredHandlers.clear();
 
     mockKafkaConsumerService = {
       initConsumer: jest.fn().mockResolvedValue(undefined),
-      registerHandler: jest.fn().mockImplementation((pattern: string, handler: any) => {
+      registerHandler: jest.fn().mockImplementation((pattern: string, handler: KafkaMessageHandler) => {
         registeredHandlers.set(pattern, handler);
       }),
       onModuleDestroy: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<KafkaConsumerService>;
+
 
     mockPaymentsService = {
       processPayment: jest.fn().mockResolvedValue({ id: 'pay-1', status: 'COMPLETED' }),
@@ -87,7 +89,7 @@ describe('PaymentsKafkaConsumer', () => {
       timestamp: new Date().toISOString(),
     };
 
-    await reservedHandler(mockEnvelope, mockMetadata);
+    await reservedHandler!(mockEnvelope, mockMetadata);
 
     expect(mockPaymentsService.processPayment).toHaveBeenCalledWith({
       orderId: 'ord-123',
@@ -99,4 +101,5 @@ describe('PaymentsKafkaConsumer', () => {
       paymentMethod: 'CREDIT_CARD',
     });
   });
+
 });

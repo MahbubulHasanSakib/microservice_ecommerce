@@ -228,11 +228,11 @@ describe('Phase 10: End-to-End Saga & Failure Scenario Tests', () => {
 
   describe('Scenario 4: Idempotency & Duplicate Order Prevention', () => {
     it('should return identical cached response on duplicate request with same idempotency key', async () => {
-      const idempotencyStore = new Map<string, any>();
+      const idempotencyStore = new Map<string, { orderId: string; status: OrderStatus; totalAmount: number; createdAt: string }>();
       const idempotencyKey = 'idemp-key-order-12345';
 
       // First request (Cache miss)
-      let firstResponse: any;
+      let firstResponse: { orderId: string; status: OrderStatus; totalAmount: number; createdAt: string } | undefined;
       if (!idempotencyStore.has(idempotencyKey)) {
         firstResponse = {
           orderId: 'ord-idemp-999',
@@ -243,10 +243,10 @@ describe('Phase 10: End-to-End Saga & Failure Scenario Tests', () => {
         idempotencyStore.set(idempotencyKey, firstResponse);
       }
 
-      expect(firstResponse.orderId).toBe('ord-idemp-999');
+      expect(firstResponse?.orderId).toBe('ord-idemp-999');
 
       // Second duplicate request (Cache hit)
-      let secondResponse: any;
+      let secondResponse: { orderId: string; status: OrderStatus; totalAmount: number; createdAt: string } | undefined;
       let orderCreationCalls = 0;
 
       if (idempotencyStore.has(idempotencyKey)) {
@@ -254,6 +254,7 @@ describe('Phase 10: End-to-End Saga & Failure Scenario Tests', () => {
       } else {
         orderCreationCalls++;
       }
+
 
       expect(secondResponse).toEqual(firstResponse);
       expect(orderCreationCalls).toBe(0); // Zero duplicate order creation calls

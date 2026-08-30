@@ -57,7 +57,9 @@ export function initTracing(serviceName: string): NodeSDK | null {
     return sdkInstance;
   } catch (error) {
     // Fail gracefully if OTel fails to start so local app still runs
+    // eslint-disable-next-line no-console
     console.warn(`[OpenTelemetry] Warning: Failed to initialize tracing for ${serviceName}: ${(error as Error).message}`);
     return null;
   }
 }
+

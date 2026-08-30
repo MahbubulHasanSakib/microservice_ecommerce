@@ -4,6 +4,7 @@ import {
   KAFKA_TOPICS,
   KafkaConsumerService,
   KafkaEventEnvelope,
+  KafkaMessageHandler,
   KafkaMessageMetadata,
   ORDER_EVENTS,
   OrderStatus,
@@ -17,18 +18,19 @@ describe('InventoryKafkaConsumer', () => {
   let consumer: InventoryKafkaConsumer;
   let mockKafkaConsumerService: jest.Mocked<KafkaConsumerService>;
   let mockInventoryService: jest.Mocked<InventoryService>;
-  const registeredHandlers = new Map<string, any>();
+  const registeredHandlers = new Map<string, KafkaMessageHandler>();
 
   beforeEach(async () => {
     registeredHandlers.clear();
 
     mockKafkaConsumerService = {
       initConsumer: jest.fn().mockResolvedValue(undefined),
-      registerHandler: jest.fn().mockImplementation((pattern: string, handler: any) => {
+      registerHandler: jest.fn().mockImplementation((pattern: string, handler: KafkaMessageHandler) => {
         registeredHandlers.set(pattern, handler);
       }),
       onModuleDestroy: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<KafkaConsumerService>;
+
 
     mockInventoryService = {
       handleOrderCreated: jest.fn().mockResolvedValue(undefined),
@@ -93,7 +95,7 @@ describe('InventoryKafkaConsumer', () => {
       timestamp: new Date().toISOString(),
     };
 
-    await orderHandler(mockEnvelope, mockMetadata);
+    await orderHandler!(mockEnvelope, mockMetadata);
 
     expect(mockInventoryService.handleOrderCreated).toHaveBeenCalledWith(mockEnvelope.data);
   });
@@ -128,8 +130,9 @@ describe('InventoryKafkaConsumer', () => {
       timestamp: new Date().toISOString(),
     };
 
-    await paymentFailedHandler(mockEnvelope, mockMetadata);
+    await paymentFailedHandler!(mockEnvelope, mockMetadata);
 
     expect(mockInventoryService.handlePaymentFailed).toHaveBeenCalledWith(mockEnvelope.data);
   });
+
 });

@@ -128,6 +128,42 @@ describe('Payment Service', () => {
       expect(kafkaProducer.emitEvent).not.toHaveBeenCalled();
     });
 
+    it('should gracefully handle P2002 race condition on concurrent duplicate payment requests', async () => {
+      const existingPayment = {
+        id: 'pay-concurrent',
+        orderId: 'ord-race-1',
+        userId: 'user-1',
+        amount: 99.5,
+        currency: 'USD',
+        status: 'COMPLETED',
+        transactionId: 'TXN-RACE',
+        paymentMethod: 'CREDIT_CARD',
+        failureReason: null,
+        refundTransactionId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // Initial check misses (null), but concurrent worker inserts first causing P2002 on create
+      prisma.payment.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(existingPayment);
+
+      const prismaUniqueError = new Error('Unique constraint failed on the fields: (orderId)');
+      (prismaUniqueError as unknown as { code: string }).code = 'P2002';
+      prisma.payment.create.mockRejectedValueOnce(prismaUniqueError);
+
+      const result = await service.processPayment({
+        orderId: 'ord-race-1',
+        userId: 'user-1',
+        amount: 99.5,
+      });
+
+      expect(result.id).toBe('pay-concurrent');
+      expect(result.status).toBe(PaymentStatus.COMPLETED);
+    });
+
+
     it('should record FAILED status and emit payment.failed when payment declines', async () => {
       prisma.payment.findUnique.mockResolvedValue(null);
 

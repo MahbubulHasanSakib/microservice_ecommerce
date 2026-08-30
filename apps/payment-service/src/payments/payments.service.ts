@@ -85,20 +85,29 @@ export class PaymentsService {
     if (isDeclined) {
       const failureReason = dto.amount <= 0 ? 'Invalid payment amount' : 'Card declined by issuing bank (insufficient funds)';
 
-      const failedPayment = await this.prisma.payment.create({
-        data: {
-          orderId: dto.orderId,
-          userId: dto.userId,
-          amount: new Prisma.Decimal(dto.amount),
-          currency: dto.currency ?? 'USD',
-          status: 'FAILED',
-          transactionId,
-          paymentMethod: dto.paymentMethod ?? 'CREDIT_CARD',
-          failureReason,
-        },
-      });
+      let failedPayment;
+      try {
+        failedPayment = await this.prisma.payment.create({
+          data: {
+            orderId: dto.orderId,
+            userId: dto.userId,
+            amount: new Prisma.Decimal(dto.amount),
+            currency: dto.currency ?? 'USD',
+            status: 'FAILED',
+            transactionId,
+            paymentMethod: dto.paymentMethod ?? 'CREDIT_CARD',
+            failureReason,
+          },
+        });
+      } catch (err: unknown) {
+        if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'P2002') {
+          const existing = await this.prisma.payment.findUnique({ where: { orderId: dto.orderId } });
+          if (existing) return this.mapToResponse(existing);
+        }
+        throw err;
+      }
 
-      // Broadcast PaymentFailedEvent to Order Service (for stock compensation) and Notification Service
+      // Broadcast PaymentFailedEvent to Kafka topic
       const failedEvent: PaymentFailedEvent = {
         paymentId: failedPayment.id,
         orderId: failedPayment.orderId,
@@ -132,17 +141,26 @@ export class PaymentsService {
     }
 
     // 3. Successful Payment
-    const completedPayment = await this.prisma.payment.create({
-      data: {
-        orderId: dto.orderId,
-        userId: dto.userId,
-        amount: new Prisma.Decimal(dto.amount),
-        currency: dto.currency ?? 'USD',
-        status: 'COMPLETED',
-        transactionId,
-        paymentMethod: dto.paymentMethod ?? 'CREDIT_CARD',
-      },
-    });
+    let completedPayment;
+    try {
+      completedPayment = await this.prisma.payment.create({
+        data: {
+          orderId: dto.orderId,
+          userId: dto.userId,
+          amount: new Prisma.Decimal(dto.amount),
+          currency: dto.currency ?? 'USD',
+          status: 'COMPLETED',
+          transactionId,
+          paymentMethod: dto.paymentMethod ?? 'CREDIT_CARD',
+        },
+      });
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'P2002') {
+        const existing = await this.prisma.payment.findUnique({ where: { orderId: dto.orderId } });
+        if (existing) return this.mapToResponse(existing);
+      }
+      throw err;
+    }
 
     // Broadcast PaymentSucceededEvent to Kafka topic
     const succeededEvent: PaymentSucceededEvent = {
@@ -176,6 +194,7 @@ export class PaymentsService {
 
     return this.mapToResponse(completedPayment);
   }
+
 
   async findByOrderId(orderId: string): Promise<PaymentResponse> {
     const payment = await this.prisma.payment.findUnique({

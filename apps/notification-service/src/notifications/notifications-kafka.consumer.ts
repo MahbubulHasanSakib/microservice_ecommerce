@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import {
   INVENTORY_EVENTS,
+  InventoryReservationFailedEvent,
   KAFKA_CONSUMER_GROUPS,
   KAFKA_TOPICS,
   KafkaConsumerService,
@@ -10,6 +11,7 @@ import {
   PaymentFailedEvent,
   PaymentSucceededEvent,
 } from '@ecommerce/shared';
+
 import { NotificationsService } from './notifications.service';
 
 @Injectable()
@@ -53,7 +55,7 @@ export class NotificationsKafkaConsumer implements OnModuleInit {
       },
     );
 
-    this.kafkaConsumer.registerHandler<any>(
+    this.kafkaConsumer.registerHandler<InventoryReservationFailedEvent>(
       INVENTORY_EVENTS.INVENTORY_FAILED,
       async (event, metadata) => {
         this.logger.log(
@@ -62,6 +64,7 @@ export class NotificationsKafkaConsumer implements OnModuleInit {
         await this.notificationsService.processInventoryFailed(event.data);
       },
     );
+
 
     // Initialize the consumer group with multi-topic subscription
     try {

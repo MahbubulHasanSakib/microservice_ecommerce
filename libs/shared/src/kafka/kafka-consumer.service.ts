@@ -13,11 +13,13 @@ export class KafkaConsumerService implements OnModuleDestroy {
   private readonly logger = new Logger(KafkaConsumerService.name);
   private kafka: Kafka | null = null;
   private consumer: Consumer | null = null;
-  private handlers = new Map<string, KafkaMessageHandler<any>>();
+  private handlers = new Map<string, KafkaMessageHandler<unknown>>();
   private isRunning = false;
 
 
+
   constructor() {}
+
 
   /**
    * Initializes and starts a consumer group listening on specified topics.
@@ -84,7 +86,7 @@ export class KafkaConsumerService implements OnModuleDestroy {
     topicOrEventType: string,
     handler: KafkaMessageHandler<T>,
   ): void {
-    this.handlers.set(topicOrEventType, handler);
+    this.handlers.set(topicOrEventType, handler as KafkaMessageHandler<unknown>);
   }
 
   private async handleIncomingMessage(payload: EachMessagePayload): Promise<void> {
@@ -98,7 +100,7 @@ export class KafkaConsumerService implements OnModuleDestroy {
       return;
     }
 
-    let envelope: KafkaEventEnvelope<any>;
+    let envelope: KafkaEventEnvelope<unknown>;
     try {
       envelope = JSON.parse(rawValue);
     } catch {
@@ -112,6 +114,7 @@ export class KafkaConsumerService implements OnModuleDestroy {
         timestamp: new Date().toISOString(),
       };
     }
+
 
     const metadata: KafkaMessageMetadata = {
       topic,
