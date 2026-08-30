@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger, Optional, Inject } from '@nestjs/common';
 import { Kafka, Producer, RecordMetadata, ProducerConfig } from 'kafkajs';
 import { randomUUID } from 'crypto';
 import {
@@ -16,13 +16,17 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
   private isConnected = false;
 
   constructor(
-    brokers: string[] = (process.env.KAFKA_BROKERS || 'localhost:9092').split(','),
-    clientId = 'ecommerce-producer',
-    producerConfig?: ProducerConfig,
+    @Optional() @Inject('KAFKA_BROKERS') brokers?: string[],
+    @Optional() @Inject('KAFKA_CLIENT_ID') clientId?: string,
+    @Optional() @Inject('KAFKA_PRODUCER_CONFIG') producerConfig?: ProducerConfig,
   ) {
+    const resolvedBrokers =
+      brokers || (process.env.KAFKA_BROKERS || 'localhost:9092').split(',');
+    const resolvedClientId = clientId || 'ecommerce-producer';
+
     this.kafka = new Kafka({
-      clientId,
-      brokers,
+      clientId: resolvedClientId,
+      brokers: resolvedBrokers,
       retry: {
         initialRetryTime: 300,
         retries: 8,
@@ -35,6 +39,7 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
       ...producerConfig,
     });
   }
+
 
   async onModuleInit() {
     try {
