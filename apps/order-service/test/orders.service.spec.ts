@@ -4,7 +4,7 @@ import { of } from 'rxjs';
 import { OrdersService } from '../src/orders/orders.service';
 import { OutboxProcessor } from '../src/orders/outbox.processor';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { PaymentStatus, SERVICES } from '@ecommerce/shared';
+import { KafkaProducerService, PaymentStatus, SERVICES } from '@ecommerce/shared';
 import { Prisma } from '../prisma/client';
 
 describe('OrdersService & Transactional Outbox', () => {
@@ -30,14 +30,9 @@ describe('OrdersService & Transactional Outbox', () => {
   let productClient: {
     send: jest.Mock;
   };
-  let rmqClient: {
-    emit: jest.Mock;
-  };
-  let inventoryClient: {
-    emit: jest.Mock;
-  };
-  let paymentRmqClient: {
-    emit: jest.Mock;
+  let kafkaProducer: {
+    emitEvent: jest.Mock;
+    emitBatch: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -63,16 +58,9 @@ describe('OrdersService & Transactional Outbox', () => {
       send: jest.fn(),
     };
 
-    rmqClient = {
-      emit: jest.fn(),
-    };
-
-    inventoryClient = {
-      emit: jest.fn(),
-    };
-
-    paymentRmqClient = {
-      emit: jest.fn(),
+    kafkaProducer = {
+      emitEvent: jest.fn().mockResolvedValue([]),
+      emitBatch: jest.fn().mockResolvedValue([]),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -88,16 +76,8 @@ describe('OrdersService & Transactional Outbox', () => {
           useValue: productClient,
         },
         {
-          provide: SERVICES.NOTIFICATION_SERVICE,
-          useValue: rmqClient,
-        },
-        {
-          provide: SERVICES.INVENTORY_SERVICE,
-          useValue: inventoryClient,
-        },
-        {
-          provide: SERVICES.PAYMENT_SERVICE,
-          useValue: paymentRmqClient,
+          provide: KafkaProducerService,
+          useValue: kafkaProducer,
         },
       ],
     }).compile();
@@ -105,6 +85,7 @@ describe('OrdersService & Transactional Outbox', () => {
     service = module.get<OrdersService>(OrdersService);
     outboxProcessor = module.get<OutboxProcessor>(OutboxProcessor);
   });
+
 
   afterEach(() => {
     outboxProcessor.stopPolling();
@@ -178,14 +159,18 @@ describe('OrdersService & Transactional Outbox', () => {
           }),
         }),
       );
-      expect(rmqClient.emit).toHaveBeenCalledWith(
+      expect(kafkaProducer.emitEvent).toHaveBeenCalledWith(
+        expect.any(String),
         'order.created',
+        'ord-1',
         expect.objectContaining({
           orderId: 'ord-1',
           orderNumber: 'ORD-12345',
         }),
+        'order-service',
       );
     });
+
 
     it('should throw BadRequestException if stock is insufficient', async () => {
       productClient.send.mockReturnValue(
@@ -229,8 +214,13 @@ describe('OrdersService & Transactional Outbox', () => {
       const processedCount = await outboxProcessor.processOutbox();
 
       expect(processedCount).toBe(1);
-      expect(rmqClient.emit).toHaveBeenCalledWith('order.created', { orderId: 'ord-1', orderNumber: 'ORD-1' });
-      expect(paymentRmqClient.emit).toHaveBeenCalledWith('order.created', { orderId: 'ord-1', orderNumber: 'ORD-1' });
+      expect(kafkaProducer.emitEvent).toHaveBeenCalledWith(
+        expect.any(String),
+        'order.created',
+        'ord-1',
+        { orderId: 'ord-1', orderNumber: 'ORD-1' },
+        'order-service',
+      );
       expect(prisma.outboxEvent.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'outbox-1' },
@@ -253,15 +243,14 @@ describe('OrdersService & Transactional Outbox', () => {
       ];
 
       prisma.outboxEvent.findMany.mockResolvedValue(mockPendingEvents);
-      rmqClient.emit.mockImplementationOnce(() => {
-        throw new Error('Connection closed');
-      });
+      kafkaProducer.emitEvent.mockRejectedValueOnce(new Error('Connection closed'));
 
       await outboxProcessor.processOutbox();
 
       expect(prisma.outboxEvent.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'outbox-failing' },
+
           data: expect.objectContaining({
             retryCount: 5,
             status: 'FAILED',

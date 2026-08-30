@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { RedisService, SERVICES } from '@ecommerce/shared';
+import { KafkaProducerService, RedisService } from '@ecommerce/shared';
 import { InventoryService } from '../src/inventory/inventory.service';
 import { InventoryController } from '../src/inventory/inventory.controller';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -26,9 +26,7 @@ describe('Inventory Service', () => {
     acquireLock: jest.Mock;
     releaseLock: jest.Mock;
   };
-  let orderRmqClient: { emit: jest.Mock };
-  let paymentRmqClient: { emit: jest.Mock };
-  let notificationRmqClient: { emit: jest.Mock };
+  let kafkaProducer: { emitEvent: jest.Mock; emitBatch: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -52,9 +50,10 @@ describe('Inventory Service', () => {
       releaseLock: jest.fn().mockResolvedValue(true),
     };
 
-    orderRmqClient = { emit: jest.fn() };
-    paymentRmqClient = { emit: jest.fn() };
-    notificationRmqClient = { emit: jest.fn() };
+    kafkaProducer = {
+      emitEvent: jest.fn().mockResolvedValue([]),
+      emitBatch: jest.fn().mockResolvedValue([]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [InventoryController],
@@ -62,15 +61,14 @@ describe('Inventory Service', () => {
         InventoryService,
         { provide: PrismaService, useValue: prisma },
         { provide: RedisService, useValue: redis },
-        { provide: SERVICES.ORDER_SERVICE, useValue: orderRmqClient },
-        { provide: SERVICES.PAYMENT_SERVICE, useValue: paymentRmqClient },
-        { provide: SERVICES.NOTIFICATION_SERVICE, useValue: notificationRmqClient },
+        { provide: KafkaProducerService, useValue: kafkaProducer },
       ],
     }).compile();
 
     service = module.get<InventoryService>(InventoryService);
     controller = module.get<InventoryController>(InventoryController);
   });
+
 
   it('should be defined', () => {
     expect(service).toBeDefined();

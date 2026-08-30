@@ -6,7 +6,7 @@ import { LoggerModule } from './common/logger/logger.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { PaymentsModule } from './payments/payments.module';
-import { MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
+import { KafkaModule, MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 
 @Module({
@@ -20,8 +20,10 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
     PrismaModule,
     MetricsModule,
     HealthModule,
+    KafkaModule,
     PaymentsModule,
   ],
+
   providers: [
     {
       provide: APP_INTERCEPTOR,

@@ -1,13 +1,11 @@
 import {
-  Inject,
   Injectable,
   Logger,
   OnModuleDestroy,
   OnModuleInit,
   Optional,
 } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
-import { SERVICES } from '@ecommerce/shared';
+import { KAFKA_TOPICS, KafkaProducerService } from '@ecommerce/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 const POLL_INTERVAL_MS = 2000;
@@ -22,19 +20,13 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(SERVICES.NOTIFICATION_SERVICE)
-    private readonly notificationClient: ClientProxy,
     @Optional()
-    @Inject(SERVICES.INVENTORY_SERVICE)
-    private readonly inventoryClient?: ClientProxy,
-    @Optional()
-    @Inject(SERVICES.PAYMENT_SERVICE)
-    private readonly paymentClient?: ClientProxy,
+    private readonly kafkaProducer?: KafkaProducerService,
   ) {}
 
   onModuleInit(): void {
     this.startPolling();
-    this.logger.log('Transactional Outbox Processor initialized.');
+    this.logger.log('Transactional Outbox Kafka Relay initialized.');
   }
 
   onModuleDestroy(): void {
@@ -57,7 +49,7 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Reads unpublished outbox events and dispatches them to RabbitMQ broker.
+   * Reads unpublished outbox events and dispatches them to Apache Kafka.
    */
   async processOutbox(): Promise<number> {
     if (this.isProcessing) {
@@ -80,23 +72,21 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
         return 0;
       }
 
-      this.logger.debug(`Found ${pendingEvents.length} pending outbox events to publish.`);
+      this.logger.debug(`Found ${pendingEvents.length} pending outbox events to stream to Kafka.`);
 
       for (const event of pendingEvents) {
         try {
           const payload = event.payload as Record<string, unknown>;
 
-          // Dispatch to Notification Service queue
-          this.notificationClient.emit(event.eventType, payload);
-
-          // Dispatch to Inventory Service queue
-          if (this.inventoryClient) {
-            this.inventoryClient.emit(event.eventType, payload);
-          }
-
-          // Dispatch to Payment Service queue
-          if (this.paymentClient) {
-            this.paymentClient.emit(event.eventType, payload);
+          // Stream to Kafka topic partitioned by aggregateId
+          if (this.kafkaProducer) {
+            await this.kafkaProducer.emitEvent(
+              KAFKA_TOPICS.ORDER_EVENTS,
+              event.eventType,
+              event.aggregateId,
+              payload,
+              'order-service',
+            );
           }
 
           // Mark outbox event as successfully published
@@ -110,7 +100,7 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
           });
 
           this.logger.log(
-            `[OUTBOX RELAY] Successfully published '${event.eventType}' for aggregate ${event.aggregateId}`,
+            `[OUTBOX KAFKA RELAY] Successfully streamed '${event.eventType}' for aggregate ${event.aggregateId}`,
           );
         } catch (dispatchError) {
           const newRetryCount = event.retryCount + 1;
@@ -126,7 +116,7 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
           });
 
           this.logger.warn(
-            `[OUTBOX RELAY] Failed to publish event ${event.id} (Attempt ${newRetryCount}/${MAX_RETRIES}): ${(dispatchError as Error).message}`,
+            `[OUTBOX KAFKA RELAY] Failed to stream event ${event.id} (Attempt ${newRetryCount}/${MAX_RETRIES}): ${(dispatchError as Error).message}`,
           );
         }
       }
@@ -137,3 +127,4 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
     }
   }
 }
+

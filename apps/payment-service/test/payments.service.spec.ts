@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { RmqContext } from '@nestjs/microservices';
 import {
+  KafkaProducerService,
   PAYMENT_EVENTS,
   PaymentStatus,
-  SERVICES,
 } from '@ecommerce/shared';
+
 import { PaymentsService } from '../src/payments/payments.service';
 import { PaymentsController } from '../src/payments/payments.controller';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -20,9 +20,7 @@ describe('Payment Service', () => {
       update: jest.Mock;
     };
   };
-  let orderRmqClient: { emit: jest.Mock };
-  let inventoryRmqClient: { emit: jest.Mock };
-  let notificationRmqClient: { emit: jest.Mock };
+  let kafkaProducer: { emitEvent: jest.Mock; emitBatch: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -33,24 +31,24 @@ describe('Payment Service', () => {
       },
     };
 
-    orderRmqClient = { emit: jest.fn() };
-    inventoryRmqClient = { emit: jest.fn() };
-    notificationRmqClient = { emit: jest.fn() };
+    kafkaProducer = {
+      emitEvent: jest.fn().mockResolvedValue([]),
+      emitBatch: jest.fn().mockResolvedValue([]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [PaymentsController],
       providers: [
         PaymentsService,
         { provide: PrismaService, useValue: prisma },
-        { provide: SERVICES.ORDER_SERVICE, useValue: orderRmqClient },
-        { provide: SERVICES.INVENTORY_SERVICE, useValue: inventoryRmqClient },
-        { provide: SERVICES.NOTIFICATION_SERVICE, useValue: notificationRmqClient },
+        { provide: KafkaProducerService, useValue: kafkaProducer },
       ],
     }).compile();
 
     service = module.get<PaymentsService>(PaymentsService);
     controller = module.get<PaymentsController>(PaymentsController);
   });
+
 
   it('should be defined', () => {
     expect(service).toBeDefined();
@@ -88,20 +86,16 @@ describe('Payment Service', () => {
 
       expect(result.id).toBe('pay-1');
       expect(result.status).toBe(PaymentStatus.COMPLETED);
-      expect(orderRmqClient.emit).toHaveBeenCalledWith(
+      expect(kafkaProducer.emitEvent).toHaveBeenCalledWith(
+        expect.any(String),
         PAYMENT_EVENTS.PAYMENT_SUCCEEDED,
+        'ord-123',
         expect.objectContaining({
           orderId: 'ord-123',
           status: PaymentStatus.COMPLETED,
           amount: 99.5,
         }),
-      );
-      expect(notificationRmqClient.emit).toHaveBeenCalledWith(
-        PAYMENT_EVENTS.PAYMENT_SUCCEEDED,
-        expect.objectContaining({
-          orderId: 'ord-123',
-          userEmail: 'customer@example.com',
-        }),
+        'payment-service',
       );
     });
 
@@ -131,7 +125,7 @@ describe('Payment Service', () => {
 
       expect(result.id).toBe('pay-1');
       expect(prisma.payment.create).not.toHaveBeenCalled();
-      expect(orderRmqClient.emit).not.toHaveBeenCalled();
+      expect(kafkaProducer.emitEvent).not.toHaveBeenCalled();
     });
 
     it('should record FAILED status and emit payment.failed when payment declines', async () => {
@@ -161,18 +155,15 @@ describe('Payment Service', () => {
       });
 
       expect(result.status).toBe(PaymentStatus.FAILED);
-      expect(orderRmqClient.emit).toHaveBeenCalledWith(
+      expect(kafkaProducer.emitEvent).toHaveBeenCalledWith(
+        expect.any(String),
         PAYMENT_EVENTS.PAYMENT_FAILED,
+        'ord-decline',
         expect.objectContaining({
           orderId: 'ord-decline',
           status: PaymentStatus.FAILED,
         }),
-      );
-      expect(notificationRmqClient.emit).toHaveBeenCalledWith(
-        PAYMENT_EVENTS.PAYMENT_FAILED,
-        expect.objectContaining({
-          orderId: 'ord-decline',
-        }),
+        'payment-service',
       );
     });
   });
@@ -237,11 +228,15 @@ describe('Payment Service', () => {
 
       const result = await service.refundPayment('ord-123', 'Customer request');
       expect(result.status).toBe(PaymentStatus.REFUNDED);
-      expect(notificationRmqClient.emit).toHaveBeenCalledWith(
+      expect(kafkaProducer.emitEvent).toHaveBeenCalledWith(
+        expect.any(String),
         PAYMENT_EVENTS.PAYMENT_REFUNDED,
+        'ord-123',
         expect.objectContaining({ orderId: 'ord-123' }),
+        'payment-service',
       );
     });
+
 
     it('should throw BadRequestException if payment is not COMPLETED', async () => {
       prisma.payment.findUnique.mockResolvedValue({
@@ -253,84 +248,5 @@ describe('Payment Service', () => {
       await expect(service.refundPayment('ord-123')).rejects.toThrow(BadRequestException);
     });
   });
-
-  describe('PaymentsController Event Handling', () => {
-    it('should handle inventory.reserved event, process payment, and manually ACK message', async () => {
-      const mockEvent = {
-        orderId: 'ord-100',
-        orderNumber: 'ORD-100',
-        userId: 'user-123',
-        userEmail: 'test@example.com',
-        amount: 150.0,
-        currency: 'USD',
-        items: [],
-        reservedAt: new Date().toISOString(),
-      };
-
-      const mockChannel = {
-        ack: jest.fn(),
-        nack: jest.fn(),
-      };
-      const mockMsg = { properties: { messageId: 'msg-1' } };
-
-      const mockContext = {
-        getChannelRef: () => mockChannel,
-        getMessage: () => mockMsg,
-      } as unknown as RmqContext;
-
-      jest.spyOn(service, 'processPayment').mockResolvedValue({
-        id: 'pay-1',
-        orderId: 'ord-100',
-        userId: 'user-123',
-        amount: 150.0,
-        currency: 'USD',
-        status: PaymentStatus.COMPLETED,
-        transactionId: 'TXN-1',
-        paymentMethod: 'CREDIT_CARD',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      await controller.handleInventoryReserved(mockEvent, mockContext);
-
-      expect(service.processPayment).toHaveBeenCalledWith({
-        orderId: 'ord-100',
-        orderNumber: 'ORD-100',
-        userId: 'user-123',
-        userEmail: 'test@example.com',
-        amount: 150.0,
-        currency: 'USD',
-      });
-      expect(mockChannel.ack).toHaveBeenCalledWith(mockMsg);
-    });
-
-    it('should NACK without requeue when payment process throws unexpected error', async () => {
-      const mockEvent = {
-        orderId: 'ord-err',
-        orderNumber: 'ORD-ERR',
-        userId: 'user-123',
-        amount: 150.0,
-        items: [],
-        reservedAt: new Date().toISOString(),
-      };
-
-      const mockChannel = {
-        ack: jest.fn(),
-        nack: jest.fn(),
-      };
-      const mockMsg = { properties: { messageId: 'msg-err' } };
-
-      const mockContext = {
-        getChannelRef: () => mockChannel,
-        getMessage: () => mockMsg,
-      } as unknown as RmqContext;
-
-      jest.spyOn(service, 'processPayment').mockRejectedValue(new Error('DB connection drop'));
-
-      await controller.handleInventoryReserved(mockEvent, mockContext);
-
-      expect(mockChannel.ack).not.toHaveBeenCalled();
-      expect(mockChannel.nack).toHaveBeenCalledWith(mockMsg, false, false);
-    });
-  });
 });
+

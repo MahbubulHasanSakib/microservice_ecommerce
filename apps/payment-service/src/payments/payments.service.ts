@@ -1,12 +1,13 @@
 import {
   BadRequestException,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
 import {
+  KAFKA_TOPICS,
+  KafkaProducerService,
   PAYMENT_EVENTS,
   PaymentFailedEvent,
   PaymentRefundedEvent,
@@ -14,8 +15,6 @@ import {
   PaymentStatus,
   PaymentSucceededEvent,
   ProcessPaymentDto,
-  SERVICES,
-  injectTraceContext,
 } from '@ecommerce/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../../prisma/client';
@@ -26,13 +25,11 @@ export class PaymentsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(SERVICES.ORDER_SERVICE)
-    private readonly orderRmqClient: ClientProxy,
-    @Inject(SERVICES.INVENTORY_SERVICE)
-    private readonly inventoryRmqClient: ClientProxy,
-    @Inject(SERVICES.NOTIFICATION_SERVICE)
-    private readonly notificationRmqClient: ClientProxy,
+    @Optional()
+    private readonly kafkaProducer?: KafkaProducerService,
   ) {}
+
+
 
   private mapToResponse(
     payment: Prisma.PaymentGetPayload<Record<string, never>>,
@@ -115,15 +112,21 @@ export class PaymentsService {
         timestamp: failedPayment.createdAt,
       };
 
-      try {
-        const tracedFailedEvent = injectTraceContext(failedEvent);
-        this.orderRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, tracedFailedEvent);
-        this.inventoryRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, tracedFailedEvent);
-        this.notificationRmqClient.emit(PAYMENT_EVENTS.PAYMENT_FAILED, tracedFailedEvent);
-        this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_FAILED}' for order ${dto.orderId}`);
-      } catch (err) {
-        this.logger.error(`Failed to emit payment.failed event: ${(err as Error).message}`);
+      if (this.kafkaProducer) {
+        this.kafkaProducer
+          .emitEvent(
+            KAFKA_TOPICS.PAYMENT_EVENTS,
+            PAYMENT_EVENTS.PAYMENT_FAILED,
+            dto.orderId,
+            failedEvent,
+            'payment-service',
+          )
+          .catch((err) => {
+            this.logger.warn(`Kafka payment.failed streaming failed: ${(err as Error).message}`);
+          });
       }
+
+      this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_FAILED}' to Kafka for order ${dto.orderId}`);
 
       return this.mapToResponse(failedPayment);
     }
@@ -141,7 +144,7 @@ export class PaymentsService {
       },
     });
 
-    // Broadcast PaymentSucceededEvent to Order Service and Notification Service
+    // Broadcast PaymentSucceededEvent to Kafka topic
     const succeededEvent: PaymentSucceededEvent = {
       paymentId: completedPayment.id,
       orderId: completedPayment.orderId,
@@ -155,14 +158,21 @@ export class PaymentsService {
       timestamp: completedPayment.createdAt,
     };
 
-    try {
-      const tracedSucceededEvent = injectTraceContext(succeededEvent);
-      this.orderRmqClient.emit(PAYMENT_EVENTS.PAYMENT_SUCCEEDED, tracedSucceededEvent);
-      this.notificationRmqClient.emit(PAYMENT_EVENTS.PAYMENT_SUCCEEDED, tracedSucceededEvent);
-      this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}' for order ${dto.orderId}`);
-    } catch (err) {
-      this.logger.error(`Failed to emit payment.succeeded event: ${(err as Error).message}`);
+    if (this.kafkaProducer) {
+      this.kafkaProducer
+        .emitEvent(
+          KAFKA_TOPICS.PAYMENT_EVENTS,
+          PAYMENT_EVENTS.PAYMENT_SUCCEEDED,
+          dto.orderId,
+          succeededEvent,
+          'payment-service',
+        )
+        .catch((err) => {
+          this.logger.warn(`Kafka payment.succeeded streaming failed: ${(err as Error).message}`);
+        });
     }
+
+    this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_SUCCEEDED}' to Kafka for order ${dto.orderId}`);
 
     return this.mapToResponse(completedPayment);
   }
@@ -227,16 +237,23 @@ export class PaymentsService {
       timestamp: new Date().toISOString(),
     };
 
-    try {
-      this.notificationRmqClient.emit(
-        PAYMENT_EVENTS.PAYMENT_REFUNDED,
-        injectTraceContext(refundEvent),
-      );
-      this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_REFUNDED}' for order ${orderId}`);
-    } catch (err) {
-      this.logger.error(`Failed to emit payment.refunded event: ${(err as Error).message}`);
+    if (this.kafkaProducer) {
+      this.kafkaProducer
+        .emitEvent(
+          KAFKA_TOPICS.PAYMENT_EVENTS,
+          PAYMENT_EVENTS.PAYMENT_REFUNDED,
+          orderId,
+          refundEvent,
+          'payment-service',
+        )
+        .catch((err) => {
+          this.logger.warn(`Kafka payment.refunded streaming failed: ${(err as Error).message}`);
+        });
     }
+
+    this.logger.log(`Emitted '${PAYMENT_EVENTS.PAYMENT_REFUNDED}' to Kafka for order ${orderId}`);
 
     return this.mapToResponse(refunded);
   }
+
 }

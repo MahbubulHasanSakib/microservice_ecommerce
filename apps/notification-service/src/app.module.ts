@@ -5,7 +5,7 @@ import { validationSchema } from './config/validation.schema';
 import { LoggerModule } from './common/logger/logger.module';
 import { HealthModule } from './health/health.module';
 import { NotificationsModule } from './notifications/notifications.module';
-import { MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
+import { KafkaModule, MetricsModule, ObservabilityInterceptor } from '@ecommerce/shared';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 
 @Module({
@@ -18,8 +18,10 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
     LoggerModule,
     MetricsModule,
     HealthModule,
+    KafkaModule,
     NotificationsModule,
   ],
+
   providers: [
     {
       provide: APP_INTERCEPTOR,

@@ -128,3 +128,29 @@ export const RABBITMQ_EXCHANGES = {
   INVENTORY_EXCHANGE: 'inventory.exchange',
   DLX_EXCHANGE: 'dlx.exchange',
 } as const;
+
+/**
+ * Apache Kafka Topic definitions across the system.
+ */
+export const KAFKA_TOPICS = {
+  ORDER_EVENTS: 'ecommerce.order.events',
+  PAYMENT_EVENTS: 'ecommerce.payment.events',
+  INVENTORY_EVENTS: 'ecommerce.inventory.events',
+  NOTIFICATION_EVENTS: 'ecommerce.notification.events',
+  ANALYTICS_EVENTS: 'ecommerce.analytics.events',
+  AUDIT_LOGS: 'ecommerce.audit.logs',
+  DLQ_TOPIC: 'ecommerce.dead-letter.events',
+} as const;
+
+/**
+ * Apache Kafka Consumer Group definitions across the system.
+ */
+export const KAFKA_CONSUMER_GROUPS = {
+  ORDER_GROUP: 'ecommerce-order-consumer-group',
+  PAYMENT_GROUP: 'ecommerce-payment-consumer-group',
+  INVENTORY_GROUP: 'ecommerce-inventory-consumer-group',
+  NOTIFICATION_GROUP: 'ecommerce-notification-consumer-group',
+  ANALYTICS_GROUP: 'ecommerce-analytics-consumer-group',
+  AUDIT_GROUP: 'ecommerce-audit-consumer-group',
+} as const;
+

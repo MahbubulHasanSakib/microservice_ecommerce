@@ -11,6 +11,8 @@ import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import {
   InventoryReservationFailedEvent,
+  KAFKA_TOPICS,
+  KafkaProducerService,
   ORDER_EVENTS,
   OrderCreatedEvent,
   OrderStatus,
@@ -21,7 +23,6 @@ import {
   PRODUCT_PATTERNS,
   ProductResponse,
   SERVICES,
-  injectTraceContext,
 } from '@ecommerce/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -38,15 +39,11 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     @Inject(SERVICES.PRODUCT_SERVICE)
     private readonly productClient: ClientProxy,
-    @Inject(SERVICES.NOTIFICATION_SERVICE)
-    private readonly notificationClient: ClientProxy,
     @Optional()
-    @Inject(SERVICES.INVENTORY_SERVICE)
-    private readonly inventoryClient?: ClientProxy,
-    @Optional()
-    @Inject(SERVICES.PAYMENT_SERVICE)
-    private readonly paymentClient?: ClientProxy,
+    private readonly kafkaProducer?: KafkaProducerService,
   ) {}
+
+
 
   private mapToResponse(
     order: Prisma.OrderGetPayload<{ include: { items: true } }>,
@@ -260,25 +257,33 @@ export class OrdersService {
       throw dbError;
     }
 
-    // 5. Fast-path asynchronous publishing to RabbitMQ (OutboxProcessor acts as reliable fallback)
+    // 5. Fast-path asynchronous publishing to Kafka (OutboxProcessor acts as reliable fallback)
     try {
-      const tracedPayload = injectTraceContext(eventPayload!);
-      this.notificationClient.emit(ORDER_EVENTS.ORDER_CREATED, tracedPayload);
-      if (this.inventoryClient) {
-        this.inventoryClient.emit(ORDER_EVENTS.ORDER_CREATED, tracedPayload);
-      }
-      if (this.paymentClient) {
-        this.paymentClient.emit(ORDER_EVENTS.ORDER_CREATED, tracedPayload);
-      }
-
       // Mark outbox event as PUBLISHED on successful fast-path emission
       await this.prisma.outboxEvent.updateMany({
         where: { aggregateId: createdOrder.id, eventType: ORDER_EVENTS.ORDER_CREATED },
         data: { status: 'PUBLISHED', publishedAt: new Date() },
       });
 
+      // Stream OrderCreated event to Kafka topic with orderId as partition key
+      if (this.kafkaProducer) {
+        this.kafkaProducer
+          .emitEvent(
+            KAFKA_TOPICS.ORDER_EVENTS,
+            ORDER_EVENTS.ORDER_CREATED,
+            createdOrder.id,
+            eventPayload!,
+            'order-service',
+          )
+          .catch((err) => {
+            this.logger.warn(
+              `Kafka event streaming failed for order #${createdOrder.orderNumber}: ${(err as Error).message}`,
+            );
+          });
+      }
+
       this.logger.log(
-        `Dispatched '${ORDER_EVENTS.ORDER_CREATED}' event for order #${createdOrder.orderNumber}`,
+        `Dispatched '${ORDER_EVENTS.ORDER_CREATED}' event to Kafka for order #${createdOrder.orderNumber}`,
       );
     } catch (eventErr) {
       this.logger.warn(
@@ -288,6 +293,8 @@ export class OrdersService {
 
     return this.mapToResponse(createdOrder);
   }
+
+
 
   async findById(id: string, userId?: string, isAdmin = false): Promise<OrderResponse> {
     const order = await this.prisma.order.findUnique({
@@ -445,6 +452,21 @@ export class OrdersService {
         data: { status: 'CONFIRMED' },
         include: { items: true },
       });
+
+      if (this.kafkaProducer) {
+        this.kafkaProducer
+          .emitEvent(
+            KAFKA_TOPICS.ORDER_EVENTS,
+            ORDER_EVENTS.ORDER_CONFIRMED,
+            updated.id,
+            this.mapToResponse(updated),
+            'order-service',
+          )
+          .catch((err) => {
+            this.logger.warn(`Kafka order.confirmed emission failed: ${(err as Error).message}`);
+          });
+      }
+
       this.logger.log(`Order #${order.orderNumber} successfully CONFIRMED after payment.`);
       return this.mapToResponse(updated);
     }
@@ -476,6 +498,20 @@ export class OrdersService {
         data: { status: 'CANCELLED' },
         include: { items: true },
       });
+
+      if (this.kafkaProducer) {
+        this.kafkaProducer
+          .emitEvent(
+            KAFKA_TOPICS.ORDER_EVENTS,
+            ORDER_EVENTS.ORDER_CANCELLED,
+            updated.id,
+            this.mapToResponse(updated),
+            'order-service',
+          )
+          .catch((err) => {
+            this.logger.warn(`Kafka order.cancelled emission failed: ${(err as Error).message}`);
+          });
+      }
 
       // 2. Compensating transaction: Restore product stock
       for (const item of order.items) {
@@ -532,9 +568,25 @@ export class OrdersService {
         data: { status: 'CANCELLED' },
         include: { items: true },
       });
+
+      if (this.kafkaProducer) {
+        this.kafkaProducer
+          .emitEvent(
+            KAFKA_TOPICS.ORDER_EVENTS,
+            ORDER_EVENTS.ORDER_CANCELLED,
+            updated.id,
+            this.mapToResponse(updated),
+            'order-service',
+          )
+          .catch((err) => {
+            this.logger.warn(`Kafka order.cancelled emission failed: ${(err as Error).message}`);
+          });
+      }
+
       this.logger.log(`Order #${order.orderNumber} CANCELLED due to out-of-stock inventory.`);
       return this.mapToResponse(updated);
     }
+
 
     return this.mapToResponse(order);
   }

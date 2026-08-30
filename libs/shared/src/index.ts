@@ -37,3 +37,10 @@ export * from './observability/metrics.service';
 export * from './observability/metrics.controller';
 export * from './observability/metrics.module';
 export * from './observability/observability.interceptor';
+
+// Kafka Event Streaming
+export * from './kafka/kafka.types';
+export * from './kafka/kafka-producer.service';
+export * from './kafka/kafka-consumer.service';
+export * from './kafka/kafka.module';
+

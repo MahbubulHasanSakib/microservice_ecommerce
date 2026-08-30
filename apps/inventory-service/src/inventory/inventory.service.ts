@@ -1,27 +1,27 @@
 import {
   BadRequestException,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
 import {
   CheckStockDto,
+
   INVENTORY_EVENTS,
   InventoryItemResponse,
   InventoryReleasedEvent,
   InventoryReservationFailedEvent,
   InventoryReservedEvent,
+  KAFKA_TOPICS,
+  KafkaProducerService,
   OrderCreatedEvent,
   PaymentFailedEvent,
   ReleaseStockDto,
   ReserveStockDto,
   RestockDto,
-  SERVICES,
   StockAvailabilityResponse,
   RedisService,
-  injectTraceContext,
 } from '@ecommerce/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '../../prisma/client';
@@ -33,13 +33,11 @@ export class InventoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
-    @Inject(SERVICES.ORDER_SERVICE)
-    private readonly orderRmqClient: ClientProxy,
-    @Inject(SERVICES.PAYMENT_SERVICE)
-    private readonly paymentRmqClient: ClientProxy,
-    @Inject(SERVICES.NOTIFICATION_SERVICE)
-    private readonly notificationRmqClient: ClientProxy,
+    @Optional()
+    private readonly kafkaProducer?: KafkaProducerService,
   ) {}
+
+
 
   private mapToResponse(item: Prisma.InventoryItemGetPayload<Record<string, never>>): InventoryItemResponse {
     return {
@@ -268,10 +266,19 @@ export class InventoryService {
       releasedAt: new Date().toISOString(),
     };
 
-    this.orderRmqClient.emit(
-      INVENTORY_EVENTS.INVENTORY_RELEASED,
-      injectTraceContext(releasedEvent),
-    );
+    if (this.kafkaProducer) {
+      this.kafkaProducer
+        .emitEvent(
+          KAFKA_TOPICS.INVENTORY_EVENTS,
+          INVENTORY_EVENTS.INVENTORY_RELEASED,
+          dto.orderId,
+          releasedEvent,
+          'inventory-service',
+        )
+        .catch((err) => {
+          this.logger.warn(`Kafka inventory.released streaming failed: ${(err as Error).message}`);
+        });
+    }
 
     this.logger.log(
       `Released ${reservations.length} reservations for order ${dto.orderId}`,
@@ -281,7 +288,7 @@ export class InventoryService {
   }
 
   /**
-   * SAGA CHOREOGRAPHY: Handle order.created event from RabbitMQ
+   * SAGA CHOREOGRAPHY: Handle order.created event from Kafka stream
    */
   async handleOrderCreated(event: OrderCreatedEvent): Promise<void> {
     this.logger.log(
@@ -300,7 +307,7 @@ export class InventoryService {
     });
 
     if (reserveResult.success) {
-      // Broadcast InventoryReservedEvent to Payment Service to initiate payment charge
+      // Broadcast InventoryReservedEvent to Kafka topic for Payment and Order services
       const reservedEvent: InventoryReservedEvent = {
         orderId: event.orderId,
         orderNumber: event.orderNumber,
@@ -311,12 +318,23 @@ export class InventoryService {
         reservedAt: new Date().toISOString(),
       };
 
-      const tracedEvent = injectTraceContext(reservedEvent);
-      this.paymentRmqClient.emit(INVENTORY_EVENTS.INVENTORY_RESERVED, tracedEvent);
-      this.orderRmqClient.emit(INVENTORY_EVENTS.INVENTORY_RESERVED, tracedEvent);
-      this.logger.log(`Emitted inventory.reserved event for order #${event.orderNumber}`);
+      if (this.kafkaProducer) {
+        this.kafkaProducer
+          .emitEvent(
+            KAFKA_TOPICS.INVENTORY_EVENTS,
+            INVENTORY_EVENTS.INVENTORY_RESERVED,
+            event.orderId,
+            reservedEvent,
+            'inventory-service',
+          )
+          .catch((err) => {
+            this.logger.warn(`Kafka inventory.reserved streaming failed: ${(err as Error).message}`);
+          });
+      }
+
+      this.logger.log(`Emitted inventory.reserved event to Kafka for order #${event.orderNumber}`);
     } else {
-      // Stock unavailable — emit inventory.failed event to cancel order and notify customer
+      // Stock unavailable — emit inventory.failed event to Kafka to cancel order and notify customer
       const failedEvent: InventoryReservationFailedEvent = {
         orderId: event.orderId,
         orderNumber: event.orderNumber,
@@ -331,12 +349,25 @@ export class InventoryService {
         timestamp: new Date().toISOString(),
       };
 
-      const tracedFailedEvent = injectTraceContext(failedEvent);
-      this.orderRmqClient.emit(INVENTORY_EVENTS.INVENTORY_FAILED, tracedFailedEvent);
-      this.notificationRmqClient.emit(INVENTORY_EVENTS.INVENTORY_FAILED, tracedFailedEvent);
-      this.logger.warn(`Emitted inventory.failed event for order #${event.orderNumber}`);
+      if (this.kafkaProducer) {
+        this.kafkaProducer
+          .emitEvent(
+            KAFKA_TOPICS.INVENTORY_EVENTS,
+            INVENTORY_EVENTS.INVENTORY_FAILED,
+            event.orderId,
+            failedEvent,
+            'inventory-service',
+          )
+          .catch((err) => {
+            this.logger.warn(`Kafka inventory.failed streaming failed: ${(err as Error).message}`);
+          });
+      }
+
+      this.logger.warn(`Emitted inventory.failed event to Kafka for order #${event.orderNumber}`);
     }
   }
+
+
 
   /**
    * SAGA COMPENSATING ACTION: Handle payment.failed event from RabbitMQ
